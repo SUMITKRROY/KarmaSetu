@@ -1,0 +1,25 @@
+{
+  "firestore": {
+    "rules": "firestore.rules"
+  },
+  "flutter": {
+    "platforms": {
+      "android": {
+        "default": {
+          "projectId": "karmasetu-app",
+          "appId": "1:776417253415:android:c59db23a7ff5bfe86c5602",
+          "fileOutput": "android/app/google-services.json"
+        }
+      },
+      "dart": {
+        "lib/firebase_options.dart": {
+          "projectId": "karmasetu-app",
+          "configurations": {
+            "android": "1:776417253415:android:c59db23a7ff5bfe86c5602",
+            "ios": "1:776417253415:ios:ef33fa51ea920bd86c5602"
+          }
+        }
+      }
+    }
+  }
+}

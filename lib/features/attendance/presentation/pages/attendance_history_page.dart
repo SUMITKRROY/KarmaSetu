@@ -1,5 +1,13 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:intl/intl.dart';
 import '../../../../app/theme/app_colors.dart';
+import '../../../auth/presentation/bloc/auth_bloc.dart';
+import '../../data/models/attendance_model.dart';
+import '../../domain/attendance_calculator.dart';
+import '../bloc/attendance_bloc.dart';
+import '../bloc/attendance_event.dart';
+import '../bloc/attendance_state.dart';
 
 class AttendanceHistoryPage extends StatefulWidget {
   const AttendanceHistoryPage({super.key});
@@ -9,9 +17,8 @@ class AttendanceHistoryPage extends StatefulWidget {
 }
 
 class _AttendanceHistoryPageState extends State<AttendanceHistoryPage> {
-  DateTime _selectedDate = DateTime(2026, 9, 1);
+  DateTime _selectedDate = DateTime.now();
 
-  // Month names
   static const List<String> _monthNames = [
     'January', 'February', 'March', 'April', 'May', 'June',
     'July', 'August', 'September', 'October', 'November', 'December'
@@ -20,26 +27,52 @@ class _AttendanceHistoryPageState extends State<AttendanceHistoryPage> {
   String get _currentMonthYear =>
       '${_monthNames[_selectedDate.month - 1]} ${_selectedDate.year}';
 
-  bool get _hasRecords => _selectedDate.month == 9 && _selectedDate.year == 2026;
+  bool get _isCurrentOrFutureMonth {
+    final now = DateTime.now();
+    return (_selectedDate.year > now.year) ||
+        (_selectedDate.year == now.year && _selectedDate.month >= now.month);
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    _fetchAttendanceForSelectedMonth();
+  }
+
+  void _fetchAttendanceForSelectedMonth() {
+    final authState = context.read<AuthBloc>().state;
+    if (authState is AuthAuthenticated) {
+      context.read<AttendanceBloc>().add(
+            LoadMonthAttendanceRequested(
+              uid: authState.user.uid,
+              month: _selectedDate,
+            ),
+          );
+    }
+  }
 
   void _previousMonth() {
     setState(() {
       _selectedDate = DateTime(_selectedDate.year, _selectedDate.month - 1, 1);
     });
+    _fetchAttendanceForSelectedMonth();
   }
 
   void _nextMonth() {
+    if (_isCurrentOrFutureMonth) return;
     setState(() {
       _selectedDate = DateTime(_selectedDate.year, _selectedDate.month + 1, 1);
     });
+    _fetchAttendanceForSelectedMonth();
   }
 
   Future<void> _openCalendarPicker() async {
+    final now = DateTime.now();
     final DateTime? picked = await showDatePicker(
       context: context,
-      initialDate: _selectedDate,
+      initialDate: _selectedDate.isAfter(now) ? now : _selectedDate,
       firstDate: DateTime(2024, 1, 1),
-      lastDate: DateTime(2028, 12, 31),
+      lastDate: DateTime(now.year, now.month, now.day),
       builder: (context, child) {
         return Theme(
           data: Theme.of(context).copyWith(
@@ -59,107 +92,126 @@ class _AttendanceHistoryPageState extends State<AttendanceHistoryPage> {
       setState(() {
         _selectedDate = DateTime(picked.year, picked.month, 1);
       });
+      _fetchAttendanceForSelectedMonth();
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: AppColors.background,
-      appBar: AppBar(
-        title: const Text('Attendance'),
-        leading: IconButton(
-          icon: const Icon(Icons.arrow_back),
-          onPressed: () => Navigator.of(context).maybePop(),
-        ),
-        actions: [
-          Padding(
-            padding: const EdgeInsets.only(right: 16),
-            child: CircleAvatar(
-              radius: 18,
-              backgroundColor: AppColors.primary,
-              child: const Icon(Icons.person, size: 20, color: Colors.white),
+    return BlocBuilder<AttendanceBloc, AttendanceState>(
+      builder: (context, state) {
+        // Filter records strictly matching the selected month and year, sorted date descending
+        final history = state.history;
+        final filteredHistory = history.where((item) {
+          return item.checkIn.year == _selectedDate.year &&
+              item.checkIn.month == _selectedDate.month;
+        }).toList()
+          ..sort((a, b) => b.checkIn.compareTo(a.checkIn));
+
+        final stats = AttendanceCalculator.calculateStats(
+          records: filteredHistory,
+          selectedMonth: _selectedDate,
+        );
+
+        final hasRecords = filteredHistory.isNotEmpty;
+
+        return Scaffold(
+          backgroundColor: AppColors.background,
+          appBar: AppBar(
+            title: const Text('Attendance History'),
+            leading: IconButton(
+              icon: const Icon(Icons.arrow_back),
+              onPressed: () => Navigator.of(context).maybePop(),
             ),
           ),
-        ],
-      ),
-      body: SafeArea(
-        child: Column(
-          children: [
-            // 1. Month Selector Bar with Calendar trigger
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-              child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 8),
-                decoration: BoxDecoration(
-                  color: const Color(0xFFEFF4FE),
-                  borderRadius: BorderRadius.circular(14),
-                  border: Border.all(color: AppColors.border.withAlpha(80)),
-                ),
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    IconButton(
-                      icon: const Icon(Icons.chevron_left, color: AppColors.textPrimary),
-                      onPressed: _previousMonth,
+          body: SafeArea(
+            child: Column(
+              children: [
+                // 1. Month Selector Bar with Calendar trigger
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 8),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFEFF4FE),
+                      borderRadius: BorderRadius.circular(14),
+                      border: Border.all(color: AppColors.border.withAlpha(80)),
                     ),
-                    InkWell(
-                      onTap: _openCalendarPicker,
-                      borderRadius: BorderRadius.circular(8),
-                      child: Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-                        child: Column(
-                          children: [
-                            Row(
-                              mainAxisSize: MainAxisSize.min,
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        IconButton(
+                          icon: const Icon(Icons.chevron_left, color: AppColors.textPrimary),
+                          onPressed: _previousMonth,
+                        ),
+                        InkWell(
+                          onTap: _openCalendarPicker,
+                          borderRadius: BorderRadius.circular(8),
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                            child: Column(
                               children: [
-                                const Icon(
-                                  Icons.calendar_month_outlined,
-                                  size: 18,
-                                  color: AppColors.textPrimary,
+                                Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    const Icon(
+                                      Icons.calendar_month_outlined,
+                                      size: 18,
+                                      color: AppColors.textPrimary,
+                                    ),
+                                    const SizedBox(width: 8),
+                                    Text(
+                                      _currentMonthYear,
+                                      style: const TextStyle(
+                                        fontSize: 16,
+                                        fontWeight: FontWeight.w700,
+                                        color: AppColors.textPrimary,
+                                      ),
+                                    ),
+                                  ],
                                 ),
-                                const SizedBox(width: 8),
+                                const SizedBox(height: 2),
                                 Text(
-                                  _currentMonthYear,
+                                  hasRecords
+                                      ? '${stats.presentDays} Days Present • ${stats.attendancePercentageString}'
+                                      : '0 Days Recorded',
                                   style: const TextStyle(
-                                    fontSize: 16,
-                                    fontWeight: FontWeight.w700,
-                                    color: AppColors.textPrimary,
+                                    fontSize: 12,
+                                    color: AppColors.textSecondary,
+                                    fontWeight: FontWeight.w500,
                                   ),
                                 ),
                               ],
                             ),
-                            if (!_hasRecords) ...[
-                              const SizedBox(height: 2),
-                              const Text(
-                                '0 Days Present',
-                                style: TextStyle(
-                                  fontSize: 12,
-                                  color: AppColors.textSecondary,
-                                  fontWeight: FontWeight.w500,
-                                ),
-                              ),
-                            ],
-                          ],
+                          ),
                         ),
-                      ),
+                        IconButton(
+                          icon: Icon(
+                            Icons.chevron_right,
+                            color: _isCurrentOrFutureMonth
+                                ? AppColors.textSecondary.withAlpha(80)
+                                : AppColors.textPrimary,
+                          ),
+                          onPressed: _isCurrentOrFutureMonth ? null : _nextMonth,
+                        ),
+                      ],
                     ),
-                    IconButton(
-                      icon: const Icon(Icons.chevron_right, color: AppColors.textPrimary),
-                      onPressed: _nextMonth,
-                    ),
-                  ],
+                  ),
                 ),
-              ),
-            ),
 
-            // 2. Content: Populated List OR Centered Empty State
-            Expanded(
-              child: _hasRecords ? _buildHistoryList() : _buildCenteredEmptyState(),
+                // 2. Content: Populated List OR Centered Empty State
+                Expanded(
+                  child: state.isLoadingHistory
+                      ? const Center(child: CircularProgressIndicator())
+                      : (hasRecords
+                          ? _buildHistoryList(filteredHistory)
+                          : _buildCenteredEmptyState()),
+                ),
+              ],
             ),
-          ],
-        ),
-      ),
+          ),
+        );
+      },
     );
   }
 
@@ -171,7 +223,6 @@ class _AttendanceHistoryPageState extends State<AttendanceHistoryPage> {
           mainAxisAlignment: MainAxisAlignment.center,
           crossAxisAlignment: CrossAxisAlignment.center,
           children: [
-            // Decorative circular illustration
             Stack(
               alignment: Alignment.center,
               children: [
@@ -181,30 +232,6 @@ class _AttendanceHistoryPageState extends State<AttendanceHistoryPage> {
                   decoration: BoxDecoration(
                     shape: BoxShape.circle,
                     color: const Color(0xFFEFF4FE).withAlpha(160),
-                  ),
-                ),
-                Positioned(
-                  top: 12,
-                  right: 22,
-                  child: Container(
-                    width: 10,
-                    height: 10,
-                    decoration: const BoxDecoration(
-                      color: Color(0xFF8CD4B4),
-                      shape: BoxShape.circle,
-                    ),
-                  ),
-                ),
-                Positioned(
-                  bottom: 18,
-                  left: 20,
-                  child: Container(
-                    width: 12,
-                    height: 12,
-                    decoration: const BoxDecoration(
-                      color: Color(0xFFB5EAD7),
-                      shape: BoxShape.circle,
-                    ),
                   ),
                 ),
                 Container(
@@ -223,8 +250,6 @@ class _AttendanceHistoryPageState extends State<AttendanceHistoryPage> {
               ],
             ),
             const SizedBox(height: 24),
-
-            // Title
             const Text(
               'No attendance records',
               textAlign: TextAlign.center,
@@ -235,44 +260,13 @@ class _AttendanceHistoryPageState extends State<AttendanceHistoryPage> {
               ),
             ),
             const SizedBox(height: 8),
-
-            // Subtitle
-            const Text(
-              'No attendance records found for this\nmonth.',
+            Text(
+              'No attendance records found for $_currentMonthYear.',
               textAlign: TextAlign.center,
-              style: TextStyle(
+              style: const TextStyle(
                 fontSize: 14,
                 color: AppColors.textSecondary,
                 height: 1.4,
-              ),
-            ),
-            const SizedBox(height: 24),
-
-            // Request Update Button
-            ElevatedButton.icon(
-              onPressed: () {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(
-                    content: Text('Attendance update requested for $_currentMonthYear!'),
-                    backgroundColor: AppColors.primary,
-                    behavior: SnackBarBehavior.floating,
-                  ),
-                );
-              },
-              icon: const Icon(Icons.add_circle_outline_rounded, size: 18),
-              label: const Text('Request Update'),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: AppColors.primary,
-                foregroundColor: Colors.white,
-                minimumSize: const Size(190, 48),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(10),
-                ),
-                elevation: 0,
-                textStyle: const TextStyle(
-                  fontSize: 15,
-                  fontWeight: FontWeight.w600,
-                ),
               ),
             ),
           ],
@@ -281,81 +275,79 @@ class _AttendanceHistoryPageState extends State<AttendanceHistoryPage> {
     );
   }
 
-  Widget _buildHistoryList() {
-    return ListView(
+  Widget _buildHistoryList(List<AttendanceModel> records) {
+    return ListView.builder(
       padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
-      children: [
-        _buildHistoryCard(
-          date: '03 Sep 2026',
-          dayTag: 'Thu',
-          status: 'Present',
-          statusColor: AppColors.primary,
-          statusBgColor: const Color(0xFFE8F3EE),
-          statusIcon: Icons.check_circle_outline,
-          checkIn: '09:42 AM',
-          checkOut: '06:18 PM',
-          duration: '8h 36m',
-          location: 'Bangalore Office',
-          accentColor: const Color(0xFF2E7D32),
-        ),
-        const SizedBox(height: 14),
-        _buildHistoryCard(
-          date: '02 Sep 2026',
-          dayTag: 'Wed',
-          status: 'Present',
-          statusColor: AppColors.primary,
-          statusBgColor: const Color(0xFFE8F3EE),
-          statusIcon: Icons.check_circle_outline,
-          checkIn: '09:38 AM',
-          checkOut: '06:11 PM',
-          duration: '8h 33m',
-          location: 'Bangalore Office',
-          accentColor: const Color(0xFF2E7D32),
-        ),
-        const SizedBox(height: 14),
-        _buildHistoryCard(
-          date: '01 Sep 2026',
-          dayTag: 'Tue',
-          status: 'Checked In',
-          statusColor: const Color(0xFF1976D2),
-          statusBgColor: const Color(0xFFE3F2FD),
-          statusIcon: Icons.access_time_rounded,
-          checkIn: '09:51 AM',
-          checkOut: '--:--',
-          duration: null,
-          location: 'Bangalore Office',
-          accentColor: const Color(0xFF00695C),
-        ),
-        const SizedBox(height: 14),
-        _buildHistoryCard(
-          date: '31 Aug 2026',
-          dayTag: 'Mon',
-          status: 'Absent',
-          statusColor: AppColors.error,
-          statusBgColor: const Color(0xFFFFEBEE),
-          statusIcon: Icons.cancel_outlined,
-          checkIn: '--:--',
-          checkOut: '--:--',
-          duration: null,
-          location: null,
-          accentColor: AppColors.error,
-        ),
-        const SizedBox(height: 14),
-        _buildHistoryCard(
-          date: '30 Aug 2026',
-          dayTag: 'Sun',
-          status: 'Leave',
-          statusColor: const Color(0xFF5E35B1),
-          statusBgColor: const Color(0xFFEDE7F6),
-          statusIcon: Icons.flight_takeoff_rounded,
-          checkIn: '--:--',
-          checkOut: '--:--',
-          duration: null,
-          location: null,
-          accentColor: const Color(0xFF9E9E9E),
-        ),
-        const SizedBox(height: 20),
-      ],
+      itemCount: records.length,
+      itemBuilder: (context, index) {
+        final record = records[index];
+        final dateStr = DateFormat('dd MMM yyyy').format(record.checkIn);
+        final dayTag = DateFormat('EEE').format(record.checkIn);
+        final checkInStr = DateFormat('hh:mm a').format(record.checkIn);
+        final checkOutStr = record.checkOut != null
+            ? DateFormat('hh:mm a').format(record.checkOut!)
+            : '--:--';
+
+        String? durationStr;
+        int durationMinutes = record.workingMinutes;
+        if (durationMinutes <= 0 && record.checkOut != null) {
+          durationMinutes = record.checkOut!.difference(record.checkIn).inMinutes;
+        }
+
+        if (durationMinutes > 0) {
+          final h = durationMinutes ~/ 60;
+          final m = durationMinutes % 60;
+          durationStr = '${h}h ${m.toString().padLeft(2, '0')}m';
+        }
+
+        final isCompleted = record.checkOut != null;
+        final isOnTime = AttendanceConfig.isOnTime(record.checkIn);
+
+        String status;
+        Color statusColor;
+        Color statusBgColor;
+        IconData statusIcon;
+        Color accentColor;
+
+        if (isCompleted) {
+          if (isOnTime) {
+            status = 'Present';
+            statusColor = AppColors.primary;
+            statusBgColor = const Color(0xFFE8F3EE);
+            statusIcon = Icons.check_circle_outline;
+            accentColor = const Color(0xFF2E7D32);
+          } else {
+            status = 'Late';
+            statusColor = const Color(0xFFD97706);
+            statusBgColor = const Color(0xFFFEF3C7);
+            statusIcon = Icons.access_time_rounded;
+            accentColor = const Color(0xFFD97706);
+          }
+        } else {
+          status = 'Checked In';
+          statusColor = const Color(0xFF1976D2);
+          statusBgColor = const Color(0xFFE3F2FD);
+          statusIcon = Icons.access_time_rounded;
+          accentColor = const Color(0xFF00695C);
+        }
+
+        return Padding(
+          padding: const EdgeInsets.only(bottom: 14),
+          child: _buildHistoryCard(
+            date: dateStr,
+            dayTag: dayTag,
+            status: status,
+            statusColor: statusColor,
+            statusBgColor: statusBgColor,
+            statusIcon: statusIcon,
+            checkIn: checkInStr,
+            checkOut: checkOutStr,
+            duration: durationStr,
+            location: record.checkInLocation.isNotEmpty ? record.checkInLocation : null,
+            accentColor: accentColor,
+          ),
+        );
+      },
     );
   }
 
@@ -394,161 +386,161 @@ class _AttendanceHistoryPageState extends State<AttendanceHistoryPage> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-          // Top Row: Date, Day, Status Chip
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Row(
-                children: [
-                  Text(
-                    date,
-                    style: const TextStyle(
-                      fontSize: 15,
-                      fontWeight: FontWeight.w700,
-                      color: AppColors.textPrimary,
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                    decoration: BoxDecoration(
-                      color: const Color(0xFFEFF4FE),
-                      borderRadius: BorderRadius.circular(6),
-                    ),
-                    child: Text(
-                      dayTag,
-                      style: const TextStyle(
-                        fontSize: 12,
-                        fontWeight: FontWeight.w600,
-                        color: Color(0xFF3355A6),
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                decoration: BoxDecoration(
-                  color: statusBgColor,
-                  borderRadius: BorderRadius.circular(20),
-                ),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Icon(statusIcon, size: 13, color: statusColor),
-                    const SizedBox(width: 4),
-                    Text(
-                      status,
-                      style: TextStyle(
-                        fontSize: 12,
-                        fontWeight: FontWeight.w600,
-                        color: statusColor,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 14),
-
-          // Time duration row
-          Row(
-            children: [
-              Row(
-                children: [
-                  const Icon(Icons.login_rounded, size: 16, color: Color(0xFF8CD4B4)),
-                  const SizedBox(width: 4),
-                  Text(
-                    checkIn,
-                    style: const TextStyle(
-                      fontSize: 14,
-                      fontWeight: FontWeight.w600,
-                      color: AppColors.textPrimary,
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(width: 8),
-              Expanded(
-                child: Row(
-                  children: [
-                    const Expanded(
-                      child: Divider(
-                        color: AppColors.border,
-                        thickness: 1,
-                      ),
-                    ),
-                    if (duration != null) ...[
-                      Container(
-                        margin: const EdgeInsets.symmetric(horizontal: 6),
-                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                        decoration: BoxDecoration(
-                          color: AppColors.background,
-                          borderRadius: BorderRadius.circular(4),
-                          border: Border.all(color: AppColors.border.withAlpha(100)),
-                        ),
-                        child: Text(
-                          duration,
-                          style: const TextStyle(
-                            fontSize: 11,
-                            color: AppColors.textSecondary,
-                            fontWeight: FontWeight.w500,
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          Row(
+                            children: [
+                              Text(
+                                date,
+                                style: const TextStyle(
+                                  fontSize: 15,
+                                  fontWeight: FontWeight.w700,
+                                  color: AppColors.textPrimary,
+                                ),
+                              ),
+                              const SizedBox(width: 8),
+                              Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                                decoration: BoxDecoration(
+                                  color: const Color(0xFFEFF4FE),
+                                  borderRadius: BorderRadius.circular(6),
+                                ),
+                                child: Text(
+                                  dayTag,
+                                  style: const TextStyle(
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.w600,
+                                    color: Color(0xFF3355A6),
+                                  ),
+                                ),
+                              ),
+                            ],
                           ),
-                        ),
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                            decoration: BoxDecoration(
+                              color: statusBgColor,
+                              borderRadius: BorderRadius.circular(20),
+                            ),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(statusIcon, size: 13, color: statusColor),
+                                const SizedBox(width: 4),
+                                Text(
+                                  status,
+                                  style: TextStyle(
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.w600,
+                                    color: statusColor,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
                       ),
-                      const Expanded(
-                        child: Divider(
-                          color: AppColors.border,
-                          thickness: 1,
-                        ),
+                      const SizedBox(height: 14),
+                      Row(
+                        children: [
+                          Row(
+                            children: [
+                              const Icon(Icons.login_rounded, size: 16, color: Color(0xFF8CD4B4)),
+                              const SizedBox(width: 4),
+                              Text(
+                                checkIn,
+                                style: const TextStyle(
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.w600,
+                                  color: AppColors.textPrimary,
+                                ),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Row(
+                              children: [
+                                const Expanded(
+                                  child: Divider(
+                                    color: AppColors.border,
+                                    thickness: 1,
+                                  ),
+                                ),
+                                if (duration != null) ...[
+                                  Container(
+                                    margin: const EdgeInsets.symmetric(horizontal: 6),
+                                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                    decoration: BoxDecoration(
+                                      color: AppColors.background,
+                                      borderRadius: BorderRadius.circular(4),
+                                      border: Border.all(color: AppColors.border.withAlpha(100)),
+                                    ),
+                                    child: Text(
+                                      duration,
+                                      style: const TextStyle(
+                                        fontSize: 11,
+                                        color: AppColors.textSecondary,
+                                        fontWeight: FontWeight.w500,
+                                      ),
+                                    ),
+                                  ),
+                                  const Expanded(
+                                    child: Divider(
+                                      color: AppColors.border,
+                                      thickness: 1,
+                                    ),
+                                  ),
+                                ],
+                              ],
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          Row(
+                            children: [
+                              Text(
+                                checkOut,
+                                style: const TextStyle(
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.w600,
+                                  color: AppColors.textPrimary,
+                                ),
+                              ),
+                              const SizedBox(width: 4),
+                              const Icon(Icons.logout_rounded, size: 16, color: AppColors.textSecondary),
+                            ],
+                          ),
+                        ],
                       ),
+                      if (location != null) ...[
+                        const SizedBox(height: 10),
+                        Row(
+                          children: [
+                            const Icon(Icons.location_on_outlined, size: 14, color: AppColors.textSecondary),
+                            const SizedBox(width: 4),
+                            Expanded(
+                              child: Text(
+                                location,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(
+                                  fontSize: 12,
+                                  color: AppColors.textSecondary,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
                     ],
-                  ],
-                ),
-              ),
-              const SizedBox(width: 8),
-              Row(
-                children: [
-                  Text(
-                    checkOut,
-                    style: const TextStyle(
-                      fontSize: 14,
-                      fontWeight: FontWeight.w600,
-                      color: AppColors.textPrimary,
-                    ),
                   ),
-                  const SizedBox(width: 4),
-                  const Icon(Icons.logout_rounded, size: 16, color: AppColors.textSecondary),
-                ],
+                ),
               ),
             ],
           ),
-
-          if (location != null) ...[
-            const SizedBox(height: 10),
-            Row(
-              children: [
-                const Icon(Icons.location_on_outlined, size: 14, color: AppColors.textSecondary),
-                const SizedBox(width: 4),
-                Text(
-                  location,
-                  style: const TextStyle(
-                    fontSize: 12,
-                    color: AppColors.textSecondary,
-                  ),
-                ),
-              ],
-            ),
-          ],
-        ],
+        ),
       ),
-    ),
-  ),
-],
-),
-),
-),
-);
-}
+    );
+  }
 }

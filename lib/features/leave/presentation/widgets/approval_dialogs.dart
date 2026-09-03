@@ -5,107 +5,139 @@ import '../../domain/entities/leave_approval_request.dart';
 class ApprovalDialogs {
   /// Displays the Approve Leave Request confirmation modal sheet or dialog (Image 4)
   static Future<bool?> showApproveConfirmation(
-    BuildContext context, {
-    required LeaveApprovalRequest request,
-  }) {
+      BuildContext context, {
+        required LeaveApprovalRequest request,
+      }) {
     return showDialog<bool>(
       context: context,
       barrierDismissible: true,
       builder: (dialogContext) {
-        return Dialog(
-          backgroundColor: Colors.transparent,
-          insetPadding: const EdgeInsets.symmetric(horizontal: 20),
-          child: Container(
-            padding: const EdgeInsets.all(24),
-            decoration: BoxDecoration(
-              color: const Color(0xFFEFF4FE),
-              borderRadius: BorderRadius.circular(20),
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.black.withAlpha(25),
-                  blurRadius: 20,
-                  offset: const Offset(0, 10),
-                ),
-              ],
-            ),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
+        // Guards against double-tap / overlapping pop() calls, which can
+        // corrupt the render tree mid-layout and throw
+        // "RenderBox was not laid out" during paint().
+        bool isClosing = false;
+
+        void safePop(dynamic result) {
+          if (isClosing) return;
+          isClosing = true;
+          if (Navigator.of(dialogContext).canPop()) {
+            Navigator.of(dialogContext).pop(result);
+          }
+        }
+
+        return StatefulBuilder(
+          builder: (context, setState) {
+            return Dialog(
+              backgroundColor: const Color(0xFFEFF4FE),
+              surfaceTintColor: Colors.transparent,
+              elevation: 6,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(20),
+              ),
+              insetPadding: const EdgeInsets.symmetric(horizontal: 20),
+              child: Padding(
+                padding: const EdgeInsets.all(24),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Container(
-                      padding: const EdgeInsets.all(4),
-                      decoration: const BoxDecoration(
-                        color: Colors.transparent,
-                        shape: BoxShape.circle,
-                      ),
-                      child: const Icon(
-                        Icons.help_outline_rounded,
-                        color: AppColors.textPrimary,
-                        size: 22,
+                    Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Container(
+                          padding: const EdgeInsets.all(4),
+                          decoration: const BoxDecoration(
+                            color: Colors.transparent,
+                            shape: BoxShape.circle,
+                          ),
+                          child: const Icon(
+                            Icons.help_outline_rounded,
+                            color: AppColors.textPrimary,
+                            size: 22,
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        const Expanded(
+                          child: Text(
+                            'Approve Leave Request?',
+                            style: TextStyle(
+                              fontSize: 18,
+                              fontWeight: FontWeight.w700,
+                              color: AppColors.textPrimary,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 12),
+                    Text(
+                      'You are about to approve ${request.duration} of ${request.leaveType} for ${request.employeeName} starting on ${request.fromDate}.',
+                      style: const TextStyle(
+                        fontSize: 14,
+                        color: AppColors.textSecondary,
+                        height: 1.45,
                       ),
                     ),
-                    const SizedBox(width: 8),
-                    const Expanded(
-                      child: Text(
-                        'Approve Leave Request?',
-                        style: TextStyle(
-                          fontSize: 18,
-                          fontWeight: FontWeight.w700,
-                          color: AppColors.textPrimary,
+                    const SizedBox(height: 24),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.end,
+                      children: [
+                        TextButton(
+                          onPressed: isClosing ? null : () => safePop(false),
+                          style: TextButton.styleFrom(
+                            foregroundColor: AppColors.textPrimary,
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 18,
+                              vertical: 12,
+                            ),
+                          ),
+                          child: const Text(
+                            'Cancel',
+                            style:
+                            TextStyle(fontWeight: FontWeight.w600, fontSize: 14),
+                          ),
                         ),
-                      ),
+                        const SizedBox(width: 12),
+                        ElevatedButton(
+                          onPressed: isClosing
+                              ? null
+                              : () {
+                            setState(() {}); // reflect disabled state
+                            safePop(true);
+                          },
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: const Color(0xFF083E2F),
+                            foregroundColor: Colors.white,
+                            elevation: 0,
+                            // Explicitly bound the minimum size. Without this,
+                            // a global ElevatedButtonTheme with
+                            // minimumSize: Size(double.infinity, 48) is
+                            // inherited, and since this button sits in a Row
+                            // (unbounded main-axis width) that throws
+                            // "BoxConstraints forces an infinite width".
+                            minimumSize: const Size(64, 44),
+                            tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(10),
+                            ),
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 22,
+                              vertical: 12,
+                            ),
+                          ),
+                          child: const Text(
+                            'Approve',
+                            style:
+                            TextStyle(fontWeight: FontWeight.w700, fontSize: 14),
+                          ),
+                        ),
+                      ],
                     ),
                   ],
                 ),
-                const SizedBox(height: 12),
-                Text(
-                  'You are about to approve ${request.duration} of ${request.leaveType} for ${request.employeeName} starting on ${request.fromDate}.',
-                  style: const TextStyle(
-                    fontSize: 14,
-                    color: AppColors.textSecondary,
-                    height: 1.45,
-                  ),
-                ),
-                const SizedBox(height: 24),
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.end,
-                  children: [
-                    TextButton(
-                      onPressed: () => Navigator.of(dialogContext).pop(false),
-                      style: TextButton.styleFrom(
-                        foregroundColor: AppColors.textPrimary,
-                        padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
-                      ),
-                      child: const Text(
-                        'Cancel',
-                        style: TextStyle(fontWeight: FontWeight.w600, fontSize: 14),
-                      ),
-                    ),
-                    const SizedBox(width: 12),
-                    ElevatedButton(
-                      onPressed: () => Navigator.of(dialogContext).pop(true),
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: const Color(0xFF083E2F),
-                        foregroundColor: Colors.white,
-                        elevation: 0,
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(10),
-                        ),
-                        padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 12),
-                      ),
-                      child: const Text(
-                        'Approve',
-                        style: TextStyle(fontWeight: FontWeight.w700, fontSize: 14),
-                      ),
-                    ),
-                  ],
-                ),
-              ],
-            ),
-          ),
+              ),
+            );
+          },
         );
       },
     );
@@ -113,137 +145,165 @@ class ApprovalDialogs {
 
   /// Displays the Reject Leave Request confirmation modal with Reason input (Image 4)
   static Future<String?> showRejectConfirmation(
-    BuildContext context, {
-    required LeaveApprovalRequest request,
-  }) {
+      BuildContext context, {
+        required LeaveApprovalRequest request,
+      }) {
     final reasonController = TextEditingController();
 
     return showDialog<String>(
       context: context,
       barrierDismissible: true,
       builder: (dialogContext) {
-        return Dialog(
-          backgroundColor: Colors.transparent,
-          insetPadding: const EdgeInsets.symmetric(horizontal: 20),
-          child: Container(
-            padding: const EdgeInsets.all(24),
-            decoration: BoxDecoration(
-              color: const Color(0xFFEFF4FE),
-              borderRadius: BorderRadius.circular(20),
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.black.withAlpha(25),
-                  blurRadius: 20,
-                  offset: const Offset(0, 10),
-                ),
-              ],
-            ),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
+        bool isClosing = false;
+
+        void safePop(dynamic result) {
+          if (isClosing) return;
+          isClosing = true;
+          if (Navigator.of(dialogContext).canPop()) {
+            Navigator.of(dialogContext).pop(result);
+          }
+        }
+
+        return StatefulBuilder(
+          builder: (context, setState) {
+            return Dialog(
+              backgroundColor: const Color(0xFFEFF4FE),
+              surfaceTintColor: Colors.transparent,
+              elevation: 6,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(20),
+              ),
+              insetPadding: const EdgeInsets.symmetric(horizontal: 20),
+              child: Padding(
+                padding: const EdgeInsets.all(24),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
                   crossAxisAlignment: CrossAxisAlignment.start,
-                  children: const [
-                    Icon(
-                      Icons.warning_amber_rounded,
-                      color: Color(0xFFC62828),
-                      size: 24,
-                    ),
-                    SizedBox(width: 8),
-                    Expanded(
-                      child: Text(
-                        'Reject Leave Request?',
-                        style: TextStyle(
-                          fontSize: 18,
-                          fontWeight: FontWeight.w700,
-                          color: AppColors.textPrimary,
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 12),
-                const Text(
-                  'Please provide a reason for rejecting this leave request.',
-                  style: TextStyle(
-                    fontSize: 14,
-                    color: AppColors.textSecondary,
-                    height: 1.45,
-                  ),
-                ),
-                const SizedBox(height: 16),
-                const Text(
-                  'Reason (Optional)',
-                  style: TextStyle(
-                    fontSize: 13,
-                    fontWeight: FontWeight.w600,
-                    color: AppColors.textPrimary,
-                  ),
-                ),
-                const SizedBox(height: 8),
-                TextField(
-                  controller: reasonController,
-                  maxLines: 3,
-                  style: const TextStyle(fontSize: 14, color: AppColors.textPrimary),
-                  decoration: InputDecoration(
-                    hintText: 'e.g., Project deadline conflicts',
-                    hintStyle: TextStyle(fontSize: 13, color: AppColors.textSecondary.withAlpha(160)),
-                    filled: true,
-                    fillColor: Colors.white,
-                    contentPadding: const EdgeInsets.all(12),
-                    enabledBorder: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(10),
-                      borderSide: const BorderSide(color: Color(0xFFD0D7E2)),
-                    ),
-                    focusedBorder: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(10),
-                      borderSide: const BorderSide(color: Color(0xFF083E2F), width: 1.5),
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 20),
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.end,
                   children: [
-                    TextButton(
-                      onPressed: () => Navigator.of(dialogContext).pop(null),
-                      style: TextButton.styleFrom(
-                        foregroundColor: AppColors.textPrimary,
-                        padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
-                      ),
-                      child: const Text(
-                        'Cancel',
-                        style: TextStyle(fontWeight: FontWeight.w600, fontSize: 14),
+                    Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: const [
+                        Icon(
+                          Icons.warning_amber_rounded,
+                          color: Color(0xFFC62828),
+                          size: 24,
+                        ),
+                        SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            'Reject Leave Request?',
+                            style: TextStyle(
+                              fontSize: 18,
+                              fontWeight: FontWeight.w700,
+                              color: AppColors.textPrimary,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 12),
+                    const Text(
+                      'Please provide a reason for rejecting this leave request.',
+                      style: TextStyle(
+                        fontSize: 14,
+                        color: AppColors.textSecondary,
+                        height: 1.45,
                       ),
                     ),
-                    const SizedBox(width: 12),
-                    ElevatedButton(
-                      onPressed: () {
-                        final reason = reasonController.text.trim();
-                        Navigator.of(dialogContext).pop(
-                          reason.isEmpty ? 'Project deadline conflicts' : reason,
-                        );
-                      },
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: const Color(0xFFC62828),
-                        foregroundColor: Colors.white,
-                        elevation: 0,
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(10),
+                    const SizedBox(height: 16),
+                    const Text(
+                      'Reason (Optional)',
+                      style: TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w600,
+                        color: AppColors.textPrimary,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    TextField(
+                      controller: reasonController,
+                      maxLines: 3,
+                      style:
+                      const TextStyle(fontSize: 14, color: AppColors.textPrimary),
+                      decoration: InputDecoration(
+                        hintText: 'e.g., Project deadline conflicts',
+                        hintStyle: TextStyle(
+                          fontSize: 13,
+                          color: AppColors.textSecondary.withAlpha(160),
                         ),
-                        padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 12),
+                        filled: true,
+                        fillColor: Colors.white,
+                        contentPadding: const EdgeInsets.all(12),
+                        enabledBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(10),
+                          borderSide: const BorderSide(color: Color(0xFFD0D7E2)),
+                        ),
+                        focusedBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(10),
+                          borderSide:
+                          const BorderSide(color: Color(0xFF083E2F), width: 1.5),
+                        ),
                       ),
-                      child: const Text(
-                        'Reject',
-                        style: TextStyle(fontWeight: FontWeight.w700, fontSize: 14),
-                      ),
+                    ),
+                    const SizedBox(height: 20),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.end,
+                      children: [
+                        TextButton(
+                          onPressed: isClosing ? null : () => safePop(null),
+                          style: TextButton.styleFrom(
+                            foregroundColor: AppColors.textPrimary,
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 18,
+                              vertical: 12,
+                            ),
+                          ),
+                          child: const Text(
+                            'Cancel',
+                            style:
+                            TextStyle(fontWeight: FontWeight.w600, fontSize: 14),
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        ElevatedButton(
+                          onPressed: isClosing
+                              ? null
+                              : () {
+                            setState(() {});
+                            final reason = reasonController.text.trim();
+                            safePop(
+                              reason.isEmpty
+                                  ? 'Project deadline conflicts'
+                                  : reason,
+                            );
+                          },
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: const Color(0xFFC62828),
+                            foregroundColor: Colors.white,
+                            elevation: 0,
+                            minimumSize: const Size(64, 44),
+                            tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(10),
+                            ),
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 22,
+                              vertical: 12,
+                            ),
+                          ),
+                          child: const Text(
+                            'Reject',
+                            style:
+                            TextStyle(fontWeight: FontWeight.w700, fontSize: 14),
+                          ),
+                        ),
+                      ],
                     ),
                   ],
                 ),
-              ],
-            ),
-          ),
+              ),
+            );
+          },
         );
       },
     );
@@ -251,10 +311,10 @@ class ApprovalDialogs {
 
   /// History modal for Leave Balance
   static void showLeaveBalanceHistory(
-    BuildContext context, {
-    required String employeeName,
-    required String leaveType,
-  }) {
+      BuildContext context, {
+        required String employeeName,
+        required String leaveType,
+      }) {
     showModalBottomSheet(
       context: context,
       backgroundColor: Colors.transparent,
@@ -315,13 +375,20 @@ class ApprovalDialogs {
                 style: const TextStyle(fontSize: 13, color: AppColors.textSecondary),
               ),
               const SizedBox(height: 20),
-              _buildHistoryRow('Total Quota Allocated', '15 Days', Icons.calendar_month_outlined),
+              _buildHistoryRow(
+                  'Total Quota Allocated', '15 Days', Icons.calendar_month_outlined),
               const Divider(height: 24),
-              _buildHistoryRow('Leaves Approved / Used', '5 Days', Icons.check_circle_outline, color: const Color(0xFF2E7D32)),
+              _buildHistoryRow('Leaves Approved / Used', '5 Days',
+                  Icons.check_circle_outline,
+                  color: const Color(0xFF2E7D32)),
               const Divider(height: 24),
-              _buildHistoryRow('Pending Approvals', '2 Days', Icons.pending_actions_outlined, color: const Color(0xFFD99A00)),
+              _buildHistoryRow('Pending Approvals', '2 Days',
+                  Icons.pending_actions_outlined,
+                  color: const Color(0xFFD99A00)),
               const Divider(height: 24),
-              _buildHistoryRow('Available Balance', '8 Days', Icons.account_balance_wallet_outlined, isBold: true),
+              _buildHistoryRow('Available Balance', '8 Days',
+                  Icons.account_balance_wallet_outlined,
+                  isBold: true),
               const SizedBox(height: 24),
               SizedBox(
                 width: double.infinity,
@@ -332,7 +399,8 @@ class ApprovalDialogs {
                     padding: const EdgeInsets.symmetric(vertical: 14),
                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                   ),
-                  child: const Text('Close', style: TextStyle(color: Colors.white, fontWeight: FontWeight.w700)),
+                  child: const Text('Close',
+                      style: TextStyle(color: Colors.white, fontWeight: FontWeight.w700)),
                 ),
               ),
             ],
@@ -342,7 +410,8 @@ class ApprovalDialogs {
     );
   }
 
-  static Widget _buildHistoryRow(String title, String value, IconData icon, {Color? color, bool isBold = false}) {
+  static Widget _buildHistoryRow(String title, String value, IconData icon,
+      {Color? color, bool isBold = false}) {
     return Row(
       children: [
         Icon(icon, size: 20, color: color ?? AppColors.textSecondary),
@@ -370,20 +439,74 @@ class ApprovalDialogs {
   }
 }
 
-/// Status Banner Widget for Approved / Rejected states (Image 4)
+/// Status Banner Widget for Approved / Rejected / Withdrawn states (Image 4)
 class LeaveStatusBanner extends StatelessWidget {
   final bool isApproved;
+  final bool isWithdrawn;
   final String? rejectionReason;
 
   const LeaveStatusBanner({
     super.key,
     required this.isApproved,
+    this.isWithdrawn = false,
     this.rejectionReason,
   });
 
   @override
   Widget build(BuildContext context) {
-    if (isApproved) {
+    if (isWithdrawn) {
+      return Container(
+        width: double.infinity,
+        padding: const EdgeInsets.all(18),
+        decoration: BoxDecoration(
+          color: const Color(0xFFF1F5F9),
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: const Color(0xFFCBD5E1)),
+        ),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Container(
+              padding: const EdgeInsets.all(3),
+              decoration: const BoxDecoration(
+                color: Color(0xFF64748B),
+                shape: BoxShape.circle,
+              ),
+              child: const Icon(
+                Icons.remove_circle_outline,
+                color: Colors.white,
+                size: 16,
+              ),
+            ),
+            const SizedBox(width: 14),
+            const Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Leave Request Withdrawn',
+                    style: TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.w700,
+                      color: Color(0xFF1E293B),
+                    ),
+                  ),
+                  SizedBox(height: 4),
+                  Text(
+                    'You have withdrawn this leave request. No action is required by your manager.',
+                    style: TextStyle(
+                      fontSize: 13,
+                      color: Color(0xFF64748B),
+                      height: 1.4,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      );
+    } else if (isApproved) {
       return Container(
         width: double.infinity,
         padding: const EdgeInsets.all(18),

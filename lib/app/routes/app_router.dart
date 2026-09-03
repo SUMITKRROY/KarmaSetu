@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../../features/auth/presentation/pages/login_page.dart';
+import '../../features/auth/presentation/pages/register_page.dart';
 import '../../features/auth/presentation/screens/splash_screen.dart';
 import '../../features/dashboard/presentation/pages/dashboard_page.dart';
 import '../../features/leave/presentation/pages/leave_requests_page.dart';
@@ -8,6 +9,7 @@ import 'route_names.dart';
 Map<String, WidgetBuilder> get appRoutes => {
       RouteNames.splash: (context) => const SplashScreen(),
       RouteNames.login: (context) => const LoginPage(),
+      RouteNames.register: (context) => const RegisterPage(),
       RouteNames.dashboard: (context) => const DashboardPage(),
       RouteNames.leaveRequests: (context) => const LeaveRequestsPage(isTab: false),
     };
@@ -51,6 +53,8 @@ class _KarmaRouterDelegate extends RouterDelegate<Object>
       child = const DashboardPage();
     } else if (_location == RouteNames.login) {
       child = const LoginPage();
+    } else if (_location == RouteNames.register) {
+      child = const RegisterPage();
     } else if (_location == RouteNames.leaveRequests) {
       child = const LeaveRequestsPage(isTab: false);
     } else {

@@ -1,5 +1,10 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_bloc/flutter_bloc.dart';
 import '../../../../app/theme/app_colors.dart';
+import '../../../auth/presentation/bloc/auth_bloc.dart';
+import '../../data/models/leave_model.dart';
+import '../../domain/entities/leave_approval_request.dart';
+import '../bloc/leave_bloc.dart';
 import 'apply_leave_page.dart';
 import 'leave_detail_page.dart';
 
@@ -12,15 +17,37 @@ class LeavePage extends StatefulWidget {
 }
 
 class _LeavePageState extends State<LeavePage> {
-  // Toggle between populated list and empty state
-  bool _showEmptyState = false;
+  @override
+  void initState() {
+    super.initState();
+    _loadUserLeaves();
+  }
+
+  void _loadUserLeaves() {
+    final authState = context.read<AuthBloc>().state;
+    if (authState is AuthAuthenticated) {
+      context.read<LeaveBloc>().add(LeaveLoadRequested(uid: authState.user.uid));
+    } else {
+      context.read<LeaveBloc>().add(const LeaveLoadRequested(uid: 'guest_user'));
+    }
+  }
+
+  String _formatDateDisplay(String dbDate) {
+    try {
+      final dt = DateTime.parse(dbDate);
+      final months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+      return '${dt.day.toString().padLeft(2, '0')} ${months[dt.month - 1]}';
+    } catch (_) {
+      return dbDate;
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: AppColors.background,
       appBar: AppBar(
-        title: const Text('Attendance'),
+        title: const Text('Leave Management'),
         leading: widget.isTab
             ? null
             : IconButton(
@@ -28,18 +55,12 @@ class _LeavePageState extends State<LeavePage> {
                 onPressed: () => Navigator.of(context).maybePop(),
               ),
         actions: [
-          // Demo toggle between Populated & Empty State
           IconButton(
-            tooltip: _showEmptyState ? 'Show Leave Overview' : 'Show Empty State',
-            icon: Icon(
-              _showEmptyState ? Icons.view_list_rounded : Icons.filter_none_rounded,
-              color: AppColors.textSecondary,
-              size: 20,
-            ),
+            tooltip: 'Sync Leaves',
+            icon: const Icon(Icons.sync_rounded, color: AppColors.textSecondary, size: 22),
             onPressed: () {
-              setState(() {
-                _showEmptyState = !_showEmptyState;
-              });
+              context.read<LeaveBloc>().add(const LeaveSyncRequested());
+              _loadUserLeaves();
             },
           ),
           Padding(
@@ -53,150 +74,239 @@ class _LeavePageState extends State<LeavePage> {
         ],
       ),
       body: SafeArea(
-        child: _showEmptyState ? _buildEmptyState() : _buildLeaveOverviewContent(),
+        child: BlocBuilder<LeaveBloc, LeaveState>(
+          builder: (context, state) {
+            if (state is LeaveLoading) {
+              return const Center(
+                child: CircularProgressIndicator(color: AppColors.primary),
+              );
+            }
+
+            if (state is LeaveLoaded) {
+              if (state.leaves.isEmpty) {
+                return _buildEmptyState();
+              }
+              return _buildLeaveOverviewContent(state);
+            }
+
+            return _buildEmptyState();
+          },
+        ),
       ),
     );
   }
 
-  Widget _buildLeaveOverviewContent() {
-    return SingleChildScrollView(
-      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          // 1. Leave Overview Header
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              const Text(
-                'Leave Overview',
-                style: TextStyle(
-                  fontSize: 18,
-                  fontWeight: FontWeight.w700,
-                  color: AppColors.textPrimary,
-                ),
-              ),
-              InkWell(
-                onTap: () {
-                  Navigator.of(context).push(
-                    MaterialPageRoute(builder: (_) => const ApplyLeavePage()),
-                  );
-                },
-                borderRadius: BorderRadius.circular(20),
-                child: Container(
-                  width: 36,
-                  height: 36,
-                  decoration: const BoxDecoration(
-                    color: AppColors.primary,
-                    shape: BoxShape.circle,
+  Widget _buildLeaveOverviewContent(LeaveLoaded state) {
+    return RefreshIndicator(
+      onRefresh: () async {
+        _loadUserLeaves();
+      },
+      child: SingleChildScrollView(
+        physics: const AlwaysScrollableScrollPhysics(),
+        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // 1. Leave Overview Header
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                const Text(
+                  'Leave Overview',
+                  style: TextStyle(
+                    fontSize: 18,
+                    fontWeight: FontWeight.w700,
+                    color: AppColors.textPrimary,
                   ),
-                  child: const Icon(Icons.add, color: Colors.white, size: 20),
                 ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 14),
-
-          // 2. 3 Stat Cards Row
-          Row(
-            children: [
-              _buildStatCard('12', 'Available'),
-              const SizedBox(width: 10),
-              _buildStatCard('2', 'Pending'),
-              const SizedBox(width: 10),
-              _buildStatCard('8', 'Approved'),
-            ],
-          ),
-          const SizedBox(height: 24),
-
-          // 3. My Leave Requests Section
-          const Text(
-            'My Leave Requests',
-            style: TextStyle(
-              fontSize: 16,
-              fontWeight: FontWeight.w700,
-              color: AppColors.textPrimary,
+                InkWell(
+                  onTap: () async {
+                    final result = await Navigator.of(context).push(
+                      MaterialPageRoute(builder: (_) => const ApplyLeavePage()),
+                    );
+                    if (result == true) {
+                      _loadUserLeaves();
+                    }
+                  },
+                  borderRadius: BorderRadius.circular(20),
+                  child: Container(
+                    width: 36,
+                    height: 36,
+                    decoration: const BoxDecoration(
+                      color: AppColors.primary,
+                      shape: BoxShape.circle,
+                    ),
+                    child: const Icon(Icons.add, color: Colors.white, size: 20),
+                  ),
+                ),
+              ],
             ),
-          ),
-          const SizedBox(height: 12),
+            const SizedBox(height: 14),
 
-          // Request Cards List
-          _buildLeaveRequestCard(
-            title: 'Casual Leave',
-            dateRange: '03 Sep — 04 Sep',
-            duration: '2 Days',
-            status: 'Pending',
-            statusColor: const Color(0xFFF57F17),
-            statusBgColor: const Color(0xFFFFF8E1),
-            statusIcon: Icons.access_time_rounded,
-            onTap: () {
-              Navigator.of(context).push(
-                MaterialPageRoute(
-                  builder: (_) => const LeaveDetailPage(
-                    leaveType: 'Casual Leave',
-                    duration: '2 Days',
-                    fromDate: '10 Sep 2026',
-                    toDate: '11 Sep 2026',
-                    reason: 'Personal work',
-                    status: 'Pending',
+            // 2. 3 Stat Cards Row
+            Row(
+              children: [
+                _buildStatCard('${state.availableLeaves}', 'Available'),
+                const SizedBox(width: 10),
+                _buildStatCard('${state.pendingLeaves}', 'Pending'),
+                const SizedBox(width: 10),
+                _buildStatCard('${state.approvedLeaves}', 'Approved'),
+              ],
+            ),
+            const SizedBox(height: 24),
+
+            // 3. My Leave Requests Section
+            const Text(
+              'My Leave Requests',
+              style: TextStyle(
+                fontSize: 16,
+                fontWeight: FontWeight.w700,
+                color: AppColors.textPrimary,
+              ),
+            ),
+            const SizedBox(height: 12),
+
+            // Request Cards List
+            ...state.leaves.map((leave) => _buildLeaveModelCard(leave)),
+            const SizedBox(height: 20),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildLeaveModelCard(LeaveModel leave) {
+    final fromDisplay = _formatDateDisplay(leave.fromDate);
+    final toDisplay = _formatDateDisplay(leave.toDate);
+    final dateRange = leave.fromDate == leave.toDate
+        ? fromDisplay
+        : '$fromDisplay — $toDisplay';
+
+    final durationText = '${leave.durationInDays} ${leave.durationInDays == 1 ? "Day" : "Days"}';
+
+    Color statusColor = const Color(0xFFF57F17);
+    Color statusBgColor = const Color(0xFFFFF8E1);
+    IconData statusIcon = Icons.access_time_rounded;
+
+    if (leave.isApproved) {
+      statusColor = AppColors.primary;
+      statusBgColor = const Color(0xFFE8F3EE);
+      statusIcon = Icons.check_circle_outline;
+    } else if (leave.isRejected) {
+      statusColor = AppColors.error;
+      statusBgColor = const Color(0xFFFFEBEE);
+      statusIcon = Icons.cancel_outlined;
+    }
+
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 12),
+      child: Container(
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: AppColors.surface,
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(color: AppColors.border),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Text(
+                  leave.leaveType,
+                  style: const TextStyle(
+                    fontSize: 15,
+                    fontWeight: FontWeight.w700,
+                    color: AppColors.textPrimary,
                   ),
                 ),
-              );
-            },
-          ),
-          const SizedBox(height: 12),
-
-          _buildLeaveRequestCard(
-            title: 'Annual Leave',
-            dateRange: '20 Aug — 22 Aug',
-            duration: '3 Days',
-            status: 'Approved',
-            statusColor: AppColors.primary,
-            statusBgColor: const Color(0xFFE8F3EE),
-            statusIcon: Icons.check_circle_outline,
-            onTap: () {
-              Navigator.of(context).push(
-                MaterialPageRoute(
-                  builder: (_) => const LeaveDetailPage(
-                    leaveType: 'Annual Leave',
-                    duration: '3 Days',
-                    fromDate: '20 Aug 2026',
-                    toDate: '22 Aug 2026',
-                    reason: 'Family vacation',
-                    status: 'Approved',
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: statusBgColor,
+                    borderRadius: BorderRadius.circular(14),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(statusIcon, size: 12, color: statusColor),
+                      const SizedBox(width: 4),
+                      Text(
+                        leave.status,
+                        style: TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                          color: statusColor,
+                        ),
+                      ),
+                    ],
                   ),
                 ),
-              );
-            },
-          ),
-          const SizedBox(height: 12),
-
-          _buildLeaveRequestCard(
-            title: 'Sick Leave',
-            dateRange: '15 Aug',
-            duration: '1 Day',
-            status: 'Rejected',
-            statusColor: AppColors.error,
-            statusBgColor: const Color(0xFFFFEBEE),
-            statusIcon: Icons.cancel_outlined,
-            onTap: () {
-              Navigator.of(context).push(
-                MaterialPageRoute(
-                  builder: (_) => const LeaveDetailPage(
-                    leaveType: 'Sick Leave',
-                    duration: '1 Day',
-                    fromDate: '15 Aug 2026',
-                    toDate: '15 Aug 2026',
-                    reason: 'Viral fever and rest',
-                    status: 'Rejected',
-                    approverRemarks: 'Leave request could not be approved due to critical project deliverables during this period.',
+              ],
+            ),
+            const SizedBox(height: 10),
+            Row(
+              children: [
+                const Icon(Icons.calendar_month_outlined, size: 14, color: AppColors.textSecondary),
+                const SizedBox(width: 6),
+                Text(
+                  dateRange,
+                  style: const TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w500,
+                    color: AppColors.textSecondary,
                   ),
                 ),
-              );
-            },
-          ),
-          const SizedBox(height: 20),
-        ],
+              ],
+            ),
+            const SizedBox(height: 12),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Text(
+                  'Duration: $durationText',
+                  style: const TextStyle(
+                    fontSize: 13,
+                    color: AppColors.textSecondary,
+                  ),
+                ),
+                GestureDetector(
+                  onTap: () async {
+                    await Navigator.of(context).push(
+                      MaterialPageRoute(
+                        builder: (_) => LeaveDetailPage(
+                          request: LeaveApprovalRequest.fromLeaveModel(leave),
+                          leaveId: leave.leaveId,
+                          leaveType: leave.leaveType,
+                          duration: durationText,
+                          fromDate: leave.fromDate,
+                          toDate: leave.toDate,
+                          reason: leave.reason,
+                          status: leave.status,
+                          approverRemarks: leave.approverRemarks,
+                          employeeName: leave.employeeName,
+                          employeeId: leave.employeeId,
+                        ),
+                      ),
+                    );
+                    if (mounted) {
+                      _loadUserLeaves();
+                    }
+                  },
+                  child: const Text(
+                    'View Details',
+                    style: TextStyle(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w600,
+                      color: AppColors.textPrimary,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -234,105 +344,6 @@ class _LeavePageState extends State<LeavePage> {
     );
   }
 
-  Widget _buildLeaveRequestCard({
-    required String title,
-    required String dateRange,
-    required String duration,
-    required String status,
-    required Color statusColor,
-    required Color statusBgColor,
-    required IconData statusIcon,
-    required VoidCallback onTap,
-  }) {
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: AppColors.surface,
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: AppColors.border),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Text(
-                title,
-                style: const TextStyle(
-                  fontSize: 15,
-                  fontWeight: FontWeight.w700,
-                  color: AppColors.textPrimary,
-                ),
-              ),
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                decoration: BoxDecoration(
-                  color: statusBgColor,
-                  borderRadius: BorderRadius.circular(14),
-                ),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Icon(statusIcon, size: 12, color: statusColor),
-                    const SizedBox(width: 4),
-                    Text(
-                      status,
-                      style: TextStyle(
-                        fontSize: 12,
-                        fontWeight: FontWeight.w600,
-                        color: statusColor,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 10),
-          Row(
-            children: [
-              const Icon(Icons.calendar_month_outlined, size: 14, color: AppColors.textSecondary),
-              const SizedBox(width: 6),
-              Text(
-                dateRange,
-                style: const TextStyle(
-                  fontSize: 13,
-                  fontWeight: FontWeight.w500,
-                  color: AppColors.textSecondary,
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 12),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Text(
-                'Duration: $duration',
-                style: const TextStyle(
-                  fontSize: 13,
-                  color: AppColors.textSecondary,
-                ),
-              ),
-              GestureDetector(
-                onTap: onTap,
-                child: const Text(
-                  'View Details',
-                  style: TextStyle(
-                    fontSize: 13,
-                    fontWeight: FontWeight.w600,
-                    color: AppColors.textPrimary,
-                  ),
-                ),
-              ),
-            ],
-          ),
-        ],
-      ),
-    );
-  }
-
   Widget _buildEmptyState() {
     return Center(
       child: SingleChildScrollView(
@@ -340,7 +351,6 @@ class _LeavePageState extends State<LeavePage> {
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            // Decorative Illustration matching screenshot
             Stack(
               alignment: Alignment.center,
               children: [
@@ -419,10 +429,13 @@ class _LeavePageState extends State<LeavePage> {
             ),
             const SizedBox(height: 24),
             ElevatedButton.icon(
-              onPressed: () {
-                Navigator.of(context).push(
+              onPressed: () async {
+                final result = await Navigator.of(context).push(
                   MaterialPageRoute(builder: (_) => const ApplyLeavePage()),
                 );
+                if (result == true) {
+                  _loadUserLeaves();
+                }
               },
               icon: const Icon(Icons.add, size: 18),
               label: const Text('Apply Leave'),
@@ -442,3 +455,4 @@ class _LeavePageState extends State<LeavePage> {
     );
   }
 }
+

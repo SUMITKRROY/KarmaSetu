@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "776417253415",
+    "project_id": "karmasetu-app",
+    "storage_bucket": "karmasetu-app.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:776417253415:android:c59db23a7ff5bfe86c5602",
+        "android_client_info": {
+          "package_name": "com.app.karmasetu"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDPhWaq60ehWH4LD2Q96wgtrYcLeIZ1U9Q"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

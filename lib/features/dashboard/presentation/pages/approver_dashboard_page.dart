@@ -44,7 +44,7 @@ class _ApproverDashboardPageState extends State<ApproverDashboardPage> {
       request: req,
     );
     if (confirmed == true) {
-      _service.approveRequest(req.id);
+      await _service.approveRequest(req.id);
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
@@ -64,7 +64,7 @@ class _ApproverDashboardPageState extends State<ApproverDashboardPage> {
       request: req,
     );
     if (reason != null) {
-      _service.rejectRequest(req.id, reason);
+      await _service.rejectRequest(req.id, reason);
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
@@ -89,7 +89,7 @@ class _ApproverDashboardPageState extends State<ApproverDashboardPage> {
       body: SafeArea(
         child: RefreshIndicator(
           onRefresh: () async {
-            setState(() {});
+            await _service.refresh();
           },
           child: SingleChildScrollView(
             physics: const AlwaysScrollableScrollPhysics(),
@@ -243,7 +243,28 @@ class _ApproverDashboardPageState extends State<ApproverDashboardPage> {
                 ),
                 const SizedBox(height: 12),
 
-                ...recentActivities.map((act) => _buildRecentActivityCard(act)),
+                if (recentActivities.isEmpty)
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.symmetric(vertical: 24, horizontal: 16),
+                    decoration: BoxDecoration(
+                      color: Colors.white,
+                      borderRadius: BorderRadius.circular(14),
+                      border: Border.all(color: AppColors.border.withAlpha(60)),
+                    ),
+                    child: const Center(
+                      child: Text(
+                        'No recent approval or rejection activity',
+                        style: TextStyle(
+                          fontSize: 13,
+                          color: AppColors.textSecondary,
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                    ),
+                  )
+                else
+                  ...recentActivities.take(5).map((act) => _buildRecentActivityCard(act)),
 
                 const SizedBox(height: 20),
               ],
@@ -619,51 +640,66 @@ class _ApproverDashboardPageState extends State<ApproverDashboardPage> {
           const SizedBox(height: 14),
 
           // Action Buttons: Reject & Approve
-          Row(
-            children: [
-              Expanded(
-                child: OutlinedButton(
-                  onPressed: () => _handleReject(req),
-                  style: OutlinedButton.styleFrom(
-                    side: const BorderSide(color: Color(0xFFC62828), width: 1.2),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(10),
-                    ),
-                    padding: const EdgeInsets.symmetric(vertical: 11),
-                  ),
-                  child: const Text(
-                    'Reject',
-                    style: TextStyle(
-                      fontSize: 14,
-                      fontWeight: FontWeight.w700,
-                      color: Color(0xFFC62828),
-                    ),
-                  ),
-                ),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: ElevatedButton(
-                  onPressed: () => _handleApprove(req),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: const Color(0xFF083E2F),
-                    elevation: 0,
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(10),
-                    ),
-                    padding: const EdgeInsets.symmetric(vertical: 11),
-                  ),
-                  child: const Text(
-                    'Approve',
-                    style: TextStyle(
-                      fontSize: 14,
-                      fontWeight: FontWeight.w700,
-                      color: Colors.white,
+          Builder(
+            builder: (context) {
+              final isLoading = _service.isRequestLoading(req.id);
+
+              return Row(
+                children: [
+                  Expanded(
+                    child: OutlinedButton(
+                      onPressed: isLoading ? null : () => _handleReject(req),
+                      style: OutlinedButton.styleFrom(
+                        side: const BorderSide(color: Color(0xFFC62828), width: 1.2),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                        padding: const EdgeInsets.symmetric(vertical: 11),
+                      ),
+                      child: const Text(
+                        'Reject',
+                        style: TextStyle(
+                          fontSize: 14,
+                          fontWeight: FontWeight.w700,
+                          color: Color(0xFFC62828),
+                        ),
+                      ),
                     ),
                   ),
-                ),
-              ),
-            ],
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: ElevatedButton(
+                      onPressed: isLoading ? null : () => _handleApprove(req),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: const Color(0xFF083E2F),
+                        elevation: 0,
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                        padding: const EdgeInsets.symmetric(vertical: 11),
+                      ),
+                      child: isLoading
+                          ? const SizedBox(
+                              width: 18,
+                              height: 18,
+                              child: CircularProgressIndicator(
+                                color: Colors.white,
+                                strokeWidth: 2,
+                              ),
+                            )
+                          : const Text(
+                              'Approve',
+                              style: TextStyle(
+                                fontSize: 14,
+                                fontWeight: FontWeight.w700,
+                                color: Colors.white,
+                              ),
+                            ),
+                    ),
+                  ),
+                ],
+              );
+            },
           ),
         ],
       ),

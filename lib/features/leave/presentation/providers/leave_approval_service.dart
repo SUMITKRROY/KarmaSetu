@@ -1,21 +1,43 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
+import '../../data/datasources/leave_local_datasource.dart';
+import '../../data/datasources/leave_remote_datasource.dart';
+import '../../data/models/leave_model.dart';
+import '../../data/repositories/leave_repository_impl.dart';
 import '../../domain/entities/leave_approval_request.dart';
+import '../../domain/repositories/leave_repository.dart';
 
 class LeaveApprovalService extends ChangeNotifier {
   static final LeaveApprovalService _instance = LeaveApprovalService._internal();
-  factory LeaveApprovalService() => _instance;
+  factory LeaveApprovalService({LeaveRepository? repository}) {
+    if (repository != null) {
+      _instance._repository = repository;
+    }
+    return _instance;
+  }
 
-  LeaveApprovalService._internal() {
-    _initInitialData();
+  LeaveRepository _repository;
+  StreamSubscription<List<LeaveModel>>? _leavesSubscription;
+
+  LeaveApprovalService._internal()
+      : _repository = LeaveRepositoryImpl(
+          remoteDataSource: LeaveRemoteDataSourceImpl(),
+          localDataSource: LeaveLocalDataSourceImpl(),
+        ) {
+    _initData();
   }
 
   final List<LeaveApprovalRequest> _allRequests = [];
   final List<LeaveApprovalRequest> _recentActivities = [];
+  final Set<String> _loadingRequestIds = {};
+  bool _isLoading = false;
 
-  // Toggle mode for testing alternate overview grid / empty states
+  // Toggle mode for overview grid
   bool _useGridOverview = false;
   bool _forceEmptyPending = false;
 
+  bool get isLoading => _isLoading;
+  bool isRequestLoading(String id) => _loadingRequestIds.contains(id);
   bool get useGridOverview => _useGridOverview;
   bool get forceEmptyPending => _forceEmptyPending;
 
@@ -34,8 +56,8 @@ class LeaveApprovalService extends ChangeNotifier {
       List.unmodifiable(_recentActivities);
 
   int get pendingCount => _forceEmptyPending ? 0 : pendingRequests.length;
-  int get approvedCount => 18 + approvedRequests.length;
-  int get rejectedCount => 2 + rejectedRequests.length;
+  int get approvedCount => approvedRequests.length;
+  int get rejectedCount => rejectedRequests.length;
 
   void toggleOverviewVariant() {
     _useGridOverview = !_useGridOverview;
@@ -44,6 +66,78 @@ class LeaveApprovalService extends ChangeNotifier {
 
   void toggleEmptyPendingState() {
     _forceEmptyPending = !_forceEmptyPending;
+    notifyListeners();
+  }
+
+  void _initData() {
+    _loadFromRepository();
+    _subscribeToLeavesStream();
+  }
+
+  void _subscribeToLeavesStream() {
+    _leavesSubscription?.cancel();
+    _leavesSubscription = _repository.streamAllLeaves().listen(
+      (leaves) {
+        _processLeaves(leaves);
+      },
+      onError: (_) {
+        // Fallback to local fetch if stream encounters error
+        _loadFromRepository();
+      },
+    );
+  }
+
+  Future<void> _loadFromRepository() async {
+    _isLoading = true;
+    notifyListeners();
+    try {
+      final leaves = await _repository.getAllLeaves();
+      _processLeaves(leaves);
+    } catch (_) {
+      // If repository fails, keep current items
+    } finally {
+      _isLoading = false;
+      notifyListeners();
+    }
+  }
+
+  void _processLeaves(List<LeaveModel> leaves) {
+    _allRequests.clear();
+    _recentActivities.clear();
+
+    if (leaves.isEmpty) {
+      // If database has no leaves yet, populate initial sample data
+      _populateMockFallback();
+      notifyListeners();
+      return;
+    }
+
+    for (final model in leaves) {
+      final request = LeaveApprovalRequest.fromLeaveModel(model);
+      _allRequests.add(request);
+
+      // If approved or rejected, add to recent activities
+      if (request.isApproved || request.isRejected) {
+        _recentActivities.add(request);
+      }
+    }
+
+    // Sort all requests: pending first, then by date descending
+    _allRequests.sort((a, b) {
+      if (a.isPending && !b.isPending) return -1;
+      if (!a.isPending && b.isPending) return 1;
+      final aDate = a.updatedAt ?? a.createdAt ?? DateTime.now();
+      final bDate = b.updatedAt ?? b.createdAt ?? DateTime.now();
+      return bDate.compareTo(aDate);
+    });
+
+    // Sort recent activities by most recently updated/created
+    _recentActivities.sort((a, b) {
+      final aDate = a.updatedAt ?? a.createdAt ?? DateTime.now();
+      final bDate = b.updatedAt ?? b.createdAt ?? DateTime.now();
+      return bDate.compareTo(aDate);
+    });
+
     notifyListeners();
   }
 
@@ -59,55 +153,121 @@ class LeaveApprovalService extends ChangeNotifier {
     }
   }
 
-  void approveRequest(String id) {
+  Future<void> approveRequest(String id) async {
+    _loadingRequestIds.add(id);
+    notifyListeners();
+
     final index = _allRequests.indexWhere((r) => r.id == id);
     if (index != -1) {
       final req = _allRequests[index];
       req.status = 'Approved';
       req.rejectionReason = null;
 
-      // Add to recent activities
+      // Update in recent activities
+      _recentActivities.removeWhere((r) => r.id == id);
       _recentActivities.insert(
         0,
         req.copyWith(
           status: 'Approved',
           activityTime: 'Just now',
+          updatedAt: DateTime.now(),
         ),
       );
       notifyListeners();
     }
+
+    // Persist to repository (Firestore + SQLite)
+    try {
+      await _repository.updateLeaveStatus(
+        leaveId: id,
+        status: 'Approved',
+      );
+    } catch (_) {} finally {
+      _loadingRequestIds.remove(id);
+      notifyListeners();
+    }
   }
 
-  void rejectRequest(String id, String reason) {
+  Future<void> rejectRequest(String id, String reason) async {
+    final trimmedReason = reason.trim().isEmpty ? 'Project deadline conflicts' : reason.trim();
+    _loadingRequestIds.add(id);
+    notifyListeners();
+
     final index = _allRequests.indexWhere((r) => r.id == id);
     if (index != -1) {
       final req = _allRequests[index];
       req.status = 'Rejected';
-      req.rejectionReason = reason.trim().isEmpty ? 'Project deadline conflicts' : reason.trim();
+      req.rejectionReason = trimmedReason;
 
-      // Add to recent activities
+      // Update in recent activities
+      _recentActivities.removeWhere((r) => r.id == id);
       _recentActivities.insert(
         0,
         req.copyWith(
           status: 'Rejected',
-          rejectionReason: req.rejectionReason,
+          rejectionReason: trimmedReason,
           activityTime: 'Just now',
+          updatedAt: DateTime.now(),
         ),
       );
       notifyListeners();
     }
+
+    // Persist to repository (Firestore + SQLite)
+    try {
+      await _repository.updateLeaveStatus(
+        leaveId: id,
+        status: 'Rejected',
+        remarks: trimmedReason,
+      );
+    } catch (_) {} finally {
+      _loadingRequestIds.remove(id);
+      notifyListeners();
+    }
   }
 
-  void resetToMockData() {
-    _initInitialData();
-    _forceEmptyPending = false;
+  Future<void> withdrawRequest(String id) async {
+    _loadingRequestIds.add(id);
     notifyListeners();
+
+    final index = _allRequests.indexWhere((r) => r.id == id);
+    if (index != -1) {
+      final req = _allRequests[index];
+      req.status = 'Withdrawn';
+      req.rejectionReason = 'Withdrawn by employee';
+
+      // Update in recent activities
+      _recentActivities.removeWhere((r) => r.id == id);
+      _recentActivities.insert(
+        0,
+        req.copyWith(
+          status: 'Withdrawn',
+          rejectionReason: 'Withdrawn by employee',
+          activityTime: 'Just now',
+          updatedAt: DateTime.now(),
+        ),
+      );
+      notifyListeners();
+    }
+
+    // Persist to repository (Firestore + SQLite)
+    try {
+      await _repository.updateLeaveStatus(
+        leaveId: id,
+        status: 'Withdrawn',
+        remarks: 'Withdrawn by employee',
+      );
+    } catch (_) {} finally {
+      _loadingRequestIds.remove(id);
+      notifyListeners();
+    }
   }
 
-  void _initInitialData() {
-    _allRequests.clear();
-    _recentActivities.clear();
+  Future<void> refresh() async {
+    await _loadFromRepository();
+  }
 
+  void _populateMockFallback() {
     _allRequests.addAll([
       LeaveApprovalRequest(
         id: 'REQ-101',
@@ -124,6 +284,8 @@ class LeaveApprovalService extends ChangeNotifier {
         reason: 'Personal work requiring travel out of city.',
         status: 'Pending',
         leaveBalance: '8 Days',
+        createdAt: DateTime.now().subtract(const Duration(hours: 3)),
+        updatedAt: DateTime.now().subtract(const Duration(hours: 3)),
       ),
       LeaveApprovalRequest(
         id: 'REQ-102',
@@ -140,6 +302,8 @@ class LeaveApprovalService extends ChangeNotifier {
         reason: 'Severe viral fever and doctor advised 1 day complete rest.',
         status: 'Pending',
         leaveBalance: '10 Days',
+        createdAt: DateTime.now().subtract(const Duration(hours: 5)),
+        updatedAt: DateTime.now().subtract(const Duration(hours: 5)),
       ),
       LeaveApprovalRequest(
         id: 'REQ-103',
@@ -156,6 +320,8 @@ class LeaveApprovalService extends ChangeNotifier {
         reason: 'Family function in hometown.',
         status: 'Pending',
         leaveBalance: '14 Days',
+        createdAt: DateTime.now().subtract(const Duration(hours: 8)),
+        updatedAt: DateTime.now().subtract(const Duration(hours: 8)),
       ),
     ]);
 
@@ -176,6 +342,8 @@ class LeaveApprovalService extends ChangeNotifier {
         status: 'Approved',
         leaveBalance: '6 Days',
         activityTime: '2 hrs ago',
+        createdAt: DateTime.now().subtract(const Duration(hours: 2)),
+        updatedAt: DateTime.now().subtract(const Duration(hours: 2)),
       ),
       LeaveApprovalRequest(
         id: 'REQ-202',
@@ -194,42 +362,15 @@ class LeaveApprovalService extends ChangeNotifier {
         rejectionReason: 'Critical sprint release window',
         leaveBalance: '5 Days',
         activityTime: 'Yesterday',
-      ),
-      LeaveApprovalRequest(
-        id: 'REQ-203',
-        employeeName: 'Sneha Mehta',
-        employeeId: 'EMP1055',
-        designation: 'QA Lead',
-        initials: 'SM',
-        avatarBgColor: const Color(0xFF083E2F),
-        leaveType: 'Privilege Leave',
-        fromDate: '12 Oct 2026',
-        toDate: '16 Oct 2026',
-        duration: '5 days',
-        dateRangeText: '12 Oct - 16 Oct',
-        reason: 'Annual family vacation.',
-        status: 'Approved',
-        leaveBalance: '15 Days',
-        activityTime: 'Oct 12',
-      ),
-      LeaveApprovalRequest(
-        id: 'REQ-204',
-        employeeName: 'Amit Kumar',
-        employeeId: 'EMP1019',
-        designation: 'DevOps Engineer',
-        initials: 'AK',
-        avatarBgColor: const Color(0xFFFFD8D8),
-        leaveType: 'Casual Leave',
-        fromDate: '28 Aug 2026',
-        toDate: '28 Aug 2026',
-        duration: '1 Day',
-        dateRangeText: '28 Aug',
-        reason: 'Personal work',
-        status: 'Rejected',
-        rejectionReason: 'Production deployment scheduled',
-        leaveBalance: '7 Days',
-        activityTime: '28 Aug 2026',
+        createdAt: DateTime.now().subtract(const Duration(days: 1)),
+        updatedAt: DateTime.now().subtract(const Duration(days: 1)),
       ),
     ]);
+  }
+
+  @override
+  void dispose() {
+    _leavesSubscription?.cancel();
+    super.dispose();
   }
 }

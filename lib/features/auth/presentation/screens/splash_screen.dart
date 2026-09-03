@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_bloc/flutter_bloc.dart';
+import '../../../../app/routes/route_names.dart';
 import '../../../../app/theme/app_colors.dart';
 import '../../../../app/theme/app_text_styles.dart';
-import '../pages/login_page.dart';
+import '../bloc/auth_bloc.dart';
 
 class SplashScreen extends StatefulWidget {
   const SplashScreen({super.key});
@@ -21,7 +23,7 @@ class _SplashScreenState extends State<SplashScreen> with SingleTickerProviderSt
       vsync: this,
       duration: const Duration(milliseconds: 1500),
     );
-    
+
     _fadeAnimation = Tween<double>(begin: 0.0, end: 1.0).animate(
       CurvedAnimation(
         parent: _animationController,
@@ -31,18 +33,18 @@ class _SplashScreenState extends State<SplashScreen> with SingleTickerProviderSt
 
     _animationController.forward();
 
-    // Navigate to Login screen after animation completes
-    Future.delayed(const Duration(milliseconds: 2400), () {
+    // Check auth status
+    context.read<AuthBloc>().add(const AuthCheckRequested());
+
+    // Navigate after animation
+    Future.delayed(const Duration(milliseconds: 2200), () {
       if (!mounted) return;
-      Navigator.of(context).pushReplacement(
-        PageRouteBuilder(
-          pageBuilder: (context, animation, secondaryAnimation) => const LoginPage(),
-          transitionsBuilder: (context, animation, secondaryAnimation, child) {
-            return FadeTransition(opacity: animation, child: child);
-          },
-          transitionDuration: const Duration(milliseconds: 250),
-        ),
-      );
+      final authState = context.read<AuthBloc>().state;
+      if (authState is AuthAuthenticated) {
+        Navigator.of(context).pushReplacementNamed(RouteNames.dashboard);
+      } else {
+        Navigator.of(context).pushReplacementNamed(RouteNames.login);
+      }
     });
   }
 
@@ -89,7 +91,7 @@ class _SplashScreenState extends State<SplashScreen> with SingleTickerProviderSt
                       border: Border.all(color: AppColors.border.withAlpha(204), width: 1),
                     ),
                   ),
-                  
+
                   // Main content
                   Column(
                     mainAxisSize: MainAxisSize.min,
@@ -136,7 +138,7 @@ class _SplashScreenState extends State<SplashScreen> with SingleTickerProviderSt
                 ],
               ),
             ),
-            
+
             // Bottom indicator
             Positioned(
               bottom: 48,

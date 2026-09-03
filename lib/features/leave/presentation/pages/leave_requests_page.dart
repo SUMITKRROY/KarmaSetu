@@ -75,7 +75,7 @@ class _LeaveRequestsPageState extends State<LeaveRequestsPage> {
       request: req,
     );
     if (confirmed == true) {
-      _service.approveRequest(req.id);
+      await _service.approveRequest(req.id);
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
@@ -95,7 +95,7 @@ class _LeaveRequestsPageState extends State<LeaveRequestsPage> {
       request: req,
     );
     if (reason != null) {
-      _service.rejectRequest(req.id, reason);
+      await _service.rejectRequest(req.id, reason);
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
@@ -176,7 +176,7 @@ class _LeaveRequestsPageState extends State<LeaveRequestsPage> {
       body: SafeArea(
         child: RefreshIndicator(
           onRefresh: () async {
-            setState(() {});
+            await _service.refresh();
           },
           child: SingleChildScrollView(
             physics: const AlwaysScrollableScrollPhysics(),
@@ -498,51 +498,66 @@ class _LeaveRequestsPageState extends State<LeaveRequestsPage> {
                 // Bottom Actions: Reject & Approve buttons (if pending)
                 if (req.isPending) ...[
                   const SizedBox(height: 14),
-                  Row(
-                    children: [
-                      Expanded(
-                        child: OutlinedButton(
-                          onPressed: () => _handleReject(req),
-                          style: OutlinedButton.styleFrom(
-                            side: const BorderSide(color: Color(0xFFC62828), width: 1.2),
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(10),
-                            ),
-                            padding: const EdgeInsets.symmetric(vertical: 11),
-                          ),
-                          child: const Text(
-                            'Reject',
-                            style: TextStyle(
-                              fontSize: 14,
-                              fontWeight: FontWeight.w700,
-                              color: Color(0xFFC62828),
-                            ),
-                          ),
-                        ),
-                      ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: ElevatedButton(
-                          onPressed: () => _handleApprove(req),
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: const Color(0xFF083E2F),
-                            elevation: 0,
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(10),
-                            ),
-                            padding: const EdgeInsets.symmetric(vertical: 11),
-                          ),
-                          child: const Text(
-                            'Approve',
-                            style: TextStyle(
-                              fontSize: 14,
-                              fontWeight: FontWeight.w700,
-                              color: Colors.white,
+                  Builder(
+                    builder: (context) {
+                      final isLoading = _service.isRequestLoading(req.id);
+
+                      return Row(
+                        children: [
+                          Expanded(
+                            child: OutlinedButton(
+                              onPressed: isLoading ? null : () => _handleReject(req),
+                              style: OutlinedButton.styleFrom(
+                                side: const BorderSide(color: Color(0xFFC62828), width: 1.2),
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(10),
+                                ),
+                                padding: const EdgeInsets.symmetric(vertical: 11),
+                              ),
+                              child: const Text(
+                                'Reject',
+                                style: TextStyle(
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.w700,
+                                  color: Color(0xFFC62828),
+                                ),
+                              ),
                             ),
                           ),
-                        ),
-                      ),
-                    ],
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: ElevatedButton(
+                              onPressed: isLoading ? null : () => _handleApprove(req),
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: const Color(0xFF083E2F),
+                                elevation: 0,
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(10),
+                                ),
+                                padding: const EdgeInsets.symmetric(vertical: 11),
+                              ),
+                              child: isLoading
+                                  ? const SizedBox(
+                                      width: 18,
+                                      height: 18,
+                                      child: CircularProgressIndicator(
+                                        color: Colors.white,
+                                        strokeWidth: 2,
+                                      ),
+                                    )
+                                  : const Text(
+                                      'Approve',
+                                      style: TextStyle(
+                                        fontSize: 14,
+                                        fontWeight: FontWeight.w700,
+                                        color: Colors.white,
+                                      ),
+                                    ),
+                            ),
+                          ),
+                        ],
+                      );
+                    },
                   ),
                 ],
               ],
