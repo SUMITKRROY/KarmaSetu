@@ -17,6 +17,8 @@ import 'features/leave/data/datasources/leave_local_datasource.dart';
 import 'features/leave/data/datasources/leave_remote_datasource.dart';
 import 'features/leave/data/repositories/leave_repository_impl.dart';
 import 'features/leave/domain/repositories/leave_repository.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'core/storage/database_helper.dart';
 import 'features/leave/presentation/bloc/leave_bloc.dart';
 import 'firebase_options.dart';
 
@@ -25,6 +27,19 @@ void main() async {
   await Firebase.initializeApp(
     options: DefaultFirebaseOptions.currentPlatform,
   );
+
+  // Disable Cloud Firestore's internal SQLite database cache so only karmaSetuDB.db is used
+  try {
+    FirebaseFirestore.instance.settings = const Settings(
+      persistenceEnabled: false,
+    );
+    await FirebaseFirestore.instance.clearPersistence();
+  } catch (_) {
+    // Ignore if persistence was already configured
+  }
+
+  // Initialize unified database karmaSetuDB.db and remove any conflicting local DBs
+  await DatabaseHelper().init();
 
   final authRemoteDataSource = AuthRemoteDataSourceImpl();
   final authLocalDataSource = AuthLocalDataSourceImpl();

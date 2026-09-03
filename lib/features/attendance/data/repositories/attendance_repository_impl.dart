@@ -51,11 +51,26 @@ class AttendanceRepositoryImpl implements AttendanceRepository {
     required String uid,
     required String date,
   }) {
-    return _remoteDataSource.streamTodayAttendance(uid: uid, date: date).map((model) {
-      if (model != null) {
-        _localDataSource.saveAttendance(model, isSynced: true);
+    return _remoteDataSource.streamTodayAttendance(uid: uid, date: date).asyncMap((model) async {
+      final local = await _localDataSource.getTodayAttendance(uid: uid, date: date);
+
+      // Local has unsynced checkout data remote doesn't know about yet — remote is stale, don't overwrite.
+      if (local != null && !local.isSynced && local.isCheckedOut) {
+        if (model == null || !model.isCheckedOut) {
+          return local;
+        }
       }
-      return model;
+
+      if (model != null) {
+        final merged = model.copyWith(
+          checkInSelfie: (model.checkInSelfie?.isNotEmpty ?? false) ? model.checkInSelfie : local?.checkInSelfie,
+          checkOutSelfie: (model.checkOutSelfie?.isNotEmpty ?? false) ? model.checkOutSelfie : local?.checkOutSelfie,
+        );
+        await _localDataSource.saveAttendance(merged, isSynced: true);
+        return merged;
+      }
+
+      return local;
     });
   }
 
@@ -94,11 +109,14 @@ class AttendanceRepositoryImpl implements AttendanceRepository {
     required int workingMinutes,
   }) async {
     final todayDate = AttendanceModel.formatDate(checkOutTime);
-    final parts = attendanceId.split('_');
-    final uid = parts.isNotEmpty ? parts[0] : '';
+    final lastUnderscore = attendanceId.lastIndexOf('_');
+    final uid = lastUnderscore != -1
+        ? attendanceId.substring(0, lastUnderscore)
+        : attendanceId;
     final local = await _localDataSource.getTodayAttendance(uid: uid, date: todayDate);
 
     final isConnected = await _networkInfo.isConnected;
+    AttendanceModel? resultModel;
 
     if (isConnected) {
       try {
@@ -112,54 +130,72 @@ class AttendanceRepositoryImpl implements AttendanceRepository {
           workingMinutes: workingMinutes,
         );
 
-        final syncedModel = updated.copyWith(isSynced: true);
-        await _localDataSource.saveAttendance(syncedModel, isSynced: true);
-        return syncedModel;
+        final mergedModel = updated.copyWith(
+          uid: updated.uid.isNotEmpty ? updated.uid : (local?.uid ?? uid),
+          employeeId: updated.employeeId.isNotEmpty ? updated.employeeId : (local?.employeeId ?? ''),
+          date: updated.date.isNotEmpty ? updated.date : (local?.date ?? todayDate),
+          checkInSelfie: (updated.checkInSelfie?.isNotEmpty ?? false)
+              ? updated.checkInSelfie
+              : local?.checkInSelfie,
+          checkOutSelfie: (selfiePath?.isNotEmpty ?? false)
+              ? selfiePath
+              : ((updated.checkOutSelfie?.isNotEmpty ?? false)
+                  ? updated.checkOutSelfie
+                  : local?.checkOutSelfie),
+          isSynced: true,
+        );
+
+        await _localDataSource.saveAttendance(mergedModel, isSynced: true);
+        resultModel = mergedModel;
       } catch (_) {
         // Fallback to offline local update on remote exception
       }
     }
 
-    // Offline checkout mode
-    if (local != null) {
-      final updatedLocal = local.copyWith(
-        checkOut: checkOutTime,
-        checkOutLatitude: latitude,
-        checkOutLongitude: longitude,
-        checkOutLocation: location,
-        checkOutSelfie: selfiePath,
-        workingMinutes: workingMinutes,
-        status: 'PRESENT',
-        updatedAt: DateTime.now(),
-        isSynced: false,
-      );
-      await _localDataSource.saveAttendance(updatedLocal, isSynced: false);
-      return updatedLocal;
-    } else {
-      // Create and save offline checkout model
-      final offlineModel = AttendanceModel(
-        attendanceId: attendanceId,
-        uid: uid,
-        employeeId: '',
-        date: todayDate,
-        checkIn: checkOutTime,
-        checkOut: checkOutTime,
-        checkInLatitude: latitude,
-        checkInLongitude: longitude,
-        checkInLocation: location,
-        checkOutLatitude: latitude,
-        checkOutLongitude: longitude,
-        checkOutLocation: location,
-        checkOutSelfie: selfiePath,
-        status: 'PRESENT',
-        workingMinutes: workingMinutes,
-        createdAt: checkOutTime,
-        updatedAt: checkOutTime,
-        isSynced: false,
-      );
-      await _localDataSource.saveAttendance(offlineModel, isSynced: false);
-      return offlineModel;
+    // Offline checkout mode or fallback
+    if (resultModel == null) {
+      if (local != null) {
+        final updatedLocal = local.copyWith(
+          checkOut: checkOutTime,
+          checkOutLatitude: latitude,
+          checkOutLongitude: longitude,
+          checkOutLocation: location,
+          checkOutSelfie: selfiePath ?? local.checkOutSelfie,
+          workingMinutes: workingMinutes,
+          status: 'PRESENT',
+          updatedAt: DateTime.now(),
+          isSynced: false,
+        );
+        await _localDataSource.saveAttendance(updatedLocal, isSynced: false);
+        resultModel = updatedLocal;
+      } else {
+        // Create and save offline checkout model
+        final offlineModel = AttendanceModel(
+          attendanceId: attendanceId,
+          uid: uid,
+          employeeId: '',
+          date: todayDate,
+          checkIn: checkOutTime,
+          checkOut: checkOutTime,
+          checkInLatitude: latitude,
+          checkInLongitude: longitude,
+          checkInLocation: location,
+          checkOutLatitude: latitude,
+          checkOutLongitude: longitude,
+          checkOutLocation: location,
+          checkOutSelfie: selfiePath,
+          status: 'PRESENT',
+          workingMinutes: workingMinutes,
+          createdAt: checkOutTime,
+          updatedAt: checkOutTime,
+          isSynced: false,
+        );
+        await _localDataSource.saveAttendance(offlineModel, isSynced: false);
+        resultModel = offlineModel;
+      }
     }
+
+    return resultModel;
   }
 
   @override

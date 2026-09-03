@@ -170,7 +170,7 @@ class AttendanceBloc extends Bloc<AttendanceEvent, AttendanceState> {
         history: historyList,
         isLoadingToday: false,
         lastRefreshed: DateTime.now(),
-        clearSelfie: validAttendance != null,
+        // clearSelfie: validAttendance != null,
       ));
     } catch (e) {
       emit(state.copyWith(
@@ -195,35 +195,46 @@ class AttendanceBloc extends Bloc<AttendanceEvent, AttendanceState> {
       return;
     }
 
-    // Only accept streamed attendance if it matches today's date
-    final validAttendance = (event.attendance != null && event.attendance!.date == currentToday)
+    final rawAttendance = (event.attendance != null && event.attendance!.date == currentToday)
         ? event.attendance
         : null;
 
     final existing = state.verifiedTodayAttendance;
     // Guard: If local record is checked out but not synced, don't let remote revert it
     if (existing != null && !existing.isSynced && existing.isCheckedOut) {
-      if (validAttendance != null && !validAttendance.isCheckedOut) {
+      if (rawAttendance != null && !rawAttendance.isCheckedOut) {
         return;
       }
     }
 
-    if (validAttendance == null && existing != null) {
+    if (rawAttendance == null && existing != null) {
       return;
     }
+
+    // Preserve local selfie paths if incoming remote stream doesn't have them
+    final validAttendance = rawAttendance != null
+        ? rawAttendance.copyWith(
+            checkInSelfie: (rawAttendance.checkInSelfie?.isNotEmpty ?? false)
+                ? rawAttendance.checkInSelfie
+                : existing?.checkInSelfie,
+            checkOutSelfie: (rawAttendance.checkOutSelfie?.isNotEmpty ?? false)
+                ? rawAttendance.checkOutSelfie
+                : existing?.checkOutSelfie,
+          )
+        : existing;
 
     final updatedHistory = validAttendance != null
         ? _updateHistoryList(state.history, validAttendance)
         : state.history;
 
     emit(state.copyWith(
-      todayAttendance: validAttendance ?? existing,
-      clearTodayAttendance: validAttendance == null && existing == null,
+      todayAttendance: validAttendance,
+      clearTodayAttendance: validAttendance == null,
       activeDate: currentToday,
       history: updatedHistory,
       isLoadingToday: false,
       lastRefreshed: DateTime.now(),
-      clearSelfie: validAttendance != null,
+      // clearSelfie: validAttendance != null,
     ));
   }
 
@@ -425,6 +436,7 @@ class AttendanceBloc extends Bloc<AttendanceEvent, AttendanceState> {
         submissionStatus: AttendanceSubmissionStatus.success,
         successMessage: message,
         currentLocation: location,
+        clearSelfie: true,
       ));
     } catch (e) {
       emit(state.copyWith(

@@ -621,24 +621,24 @@ class _AttendancePageState extends State<AttendancePage> with WidgetsBindingObse
     String photoStatusLabel = '';
     bool isNewlyCaptured = false;
 
-    if (selfiePath != null && File(selfiePath).existsSync()) {
-      displayImagePath = selfiePath;
-      photoStatusLabel = isCheckedIn ? 'Ready for Check-Out' : 'Ready for Check-In';
-      isNewlyCaptured = true;
-    } else if (isCheckedOut) {
+    if (isCheckedOut) {
       if (todayAttendance?.checkOutSelfie != null && File(todayAttendance!.checkOutSelfie!).existsSync()) {
         displayImagePath = todayAttendance.checkOutSelfie;
+        photoStatusLabel = 'Check-Out Photo (Saved Locally)';
+      } else if (selfiePath != null && File(selfiePath).existsSync()) {
+        displayImagePath = selfiePath;
         photoStatusLabel = 'Check-Out Photo (Saved Locally)';
       } else if (todayAttendance?.checkInSelfie != null && File(todayAttendance!.checkInSelfie!).existsSync()) {
         displayImagePath = todayAttendance.checkInSelfie;
         photoStatusLabel = 'Check-In Photo (Saved Locally)';
       }
-    } else if (isCheckedIn) {
-      if (todayAttendance?.checkInSelfie != null && File(todayAttendance!.checkInSelfie!).existsSync()) {
-        displayImagePath = todayAttendance.checkInSelfie;
-        photoStatusLabel = 'Check-In Photo (Saved in DB)';
-      }
+    } else if (selfiePath != null && File(selfiePath).existsSync()) {
+      displayImagePath = selfiePath;
+      photoStatusLabel = isCheckedIn ? 'Ready for Check-Out' : 'Ready for Check-In';
+      isNewlyCaptured = true;
     }
+    // When checked-in, do NOT display the previous check-in selfie here.
+    // Keep displayImagePath null (blank state) so user is prompted to capture check-out selfie.
 
     final hasDisplayImage = displayImagePath != null && File(displayImagePath).existsSync();
 
@@ -654,7 +654,7 @@ class _AttendancePageState extends State<AttendancePage> with WidgetsBindingObse
       buttonText = 'Retake Photo';
     } else if (isCheckedIn) {
       cardTitle = 'Identity Verification (Check-Out)';
-      badgeTitle = isNewlyCaptured ? 'Ready for Punch-Out' : 'Check-Out Photo Required';
+      badgeTitle = isNewlyCaptured ? 'Ready for Punch-Out' : '*';
       promptText = 'Capture selfie with camera to Punch Out';
       buttonText = isNewlyCaptured ? 'Retake Photo' : 'Take Selfie for Check-Out';
     } else {
@@ -691,29 +691,6 @@ class _AttendancePageState extends State<AttendancePage> with WidgetsBindingObse
                     ),
                   ),
                 ],
-              ),
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                decoration: BoxDecoration(
-                  color: isCheckedOut || (hasDisplayImage && (!isCheckedIn || isNewlyCaptured))
-                      ? const Color(0xFFE8F3EE)
-                      : const Color(0xFFFEF3C7),
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                child: Text(
-                  isCheckedOut
-                      ? 'Verified'
-                      : (hasDisplayImage && (!isCheckedIn || isNewlyCaptured)
-                          ? 'Verified'
-                          : badgeTitle),
-                  style: TextStyle(
-                    fontSize: 11,
-                    fontWeight: FontWeight.w600,
-                    color: isCheckedOut || (hasDisplayImage && (!isCheckedIn || isNewlyCaptured))
-                        ? const Color(0xFF059669)
-                        : const Color(0xFFD97706),
-                  ),
-                ),
               ),
             ],
           ),
@@ -775,17 +752,13 @@ class _AttendancePageState extends State<AttendancePage> with WidgetsBindingObse
                           ElevatedButton.icon(
                             onPressed: _takeSelfie,
                             icon: const Icon(Icons.camera_alt_outlined, size: 15),
-                            label: Text(
-                              isCheckedIn && !isNewlyCaptured ? 'Take Check-Out Photo' : 'Retake',
-                              style: const TextStyle(fontSize: 12),
+                            label: const Text(
+                              'Retake',
+                              style: TextStyle(fontSize: 12),
                             ),
                             style: ElevatedButton.styleFrom(
-                              backgroundColor: isCheckedIn && !isNewlyCaptured
-                                  ? AppColors.primary
-                                  : Colors.white,
-                              foregroundColor: isCheckedIn && !isNewlyCaptured
-                                  ? Colors.white
-                                  : AppColors.textPrimary,
+                              backgroundColor: Colors.white,
+                              foregroundColor: AppColors.textPrimary,
                               elevation: 2,
                               minimumSize: const Size(80, 32),
                               padding: const EdgeInsets.symmetric(horizontal: 10),
@@ -800,22 +773,6 @@ class _AttendancePageState extends State<AttendancePage> with WidgetsBindingObse
                 ],
               ),
             ),
-            if (isCheckedIn && !isNewlyCaptured) ...[
-              const SizedBox(height: 12),
-              OutlinedButton.icon(
-                onPressed: _takeSelfie,
-                icon: const Icon(Icons.camera_alt_outlined, size: 18),
-                label: const Text('Capture Selfie for Check-Out'),
-                style: OutlinedButton.styleFrom(
-                  minimumSize: const Size(double.infinity, 44),
-                  foregroundColor: AppColors.primary,
-                  side: const BorderSide(color: AppColors.primary),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(10),
-                  ),
-                ),
-              ),
-            ],
           ] else if (isCheckedOut) ...[
             Container(
               padding: const EdgeInsets.all(16),
