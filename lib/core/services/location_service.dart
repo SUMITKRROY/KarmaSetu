@@ -48,15 +48,38 @@ class LocationService {
     }
 
     try {
-      final position = await Geolocator.getCurrentPosition(
-        locationSettings: const LocationSettings(
-          accuracy: LocationAccuracy.high,
-          timeLimit: Duration(seconds: 15),
-        ),
-      );
+      Position? position;
+      try {
+        position = await Geolocator.getCurrentPosition(
+          locationSettings: const LocationSettings(
+            accuracy: LocationAccuracy.high,
+            timeLimit: Duration(seconds: 6),
+          ),
+        );
+      } catch (_) {
+        // Fallback to cached hardware GPS location if offline satellite fix is slow
+        position = await Geolocator.getLastKnownPosition();
+      }
+
+      if (position == null) {
+        try {
+          position = await Geolocator.getCurrentPosition(
+            locationSettings: const LocationSettings(
+              accuracy: LocationAccuracy.medium,
+              timeLimit: Duration(seconds: 4),
+            ),
+          );
+        } catch (_) {
+          position = await Geolocator.getLastKnownPosition();
+        }
+      }
+
+      if (position == null) {
+        return null;
+      }
 
       String address = 'Lat: ${position.latitude.toStringAsFixed(4)}, Lon: ${position.longitude.toStringAsFixed(4)}';
-      String? locality;
+      String? locality = 'GPS Location';
       String? subLocality;
       String? adminArea;
 

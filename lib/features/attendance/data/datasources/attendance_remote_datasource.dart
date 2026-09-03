@@ -24,6 +24,8 @@ abstract interface class AttendanceRemoteDataSource {
     required int workingMinutes,
   });
 
+  Future<AttendanceModel> syncAttendance(AttendanceModel model);
+
   Future<List<AttendanceModel>> getAttendanceHistory(String uid);
 }
 
@@ -140,6 +142,22 @@ class AttendanceRemoteDataSourceImpl implements AttendanceRemoteDataSource {
   }
 
   @override
+  Future<AttendanceModel> syncAttendance(AttendanceModel model) async {
+    final docId = model.attendanceId.isNotEmpty
+        ? model.attendanceId
+        : '${model.uid}_${model.date}';
+
+    final updatedModel = model.copyWith(attendanceId: docId);
+
+    await _firestore
+        .collection(_collection)
+        .doc(docId)
+        .set(updatedModel.toFirestore(), SetOptions(merge: true));
+
+    return updatedModel;
+  }
+
+  @override
   Future<List<AttendanceModel>> getAttendanceHistory(String uid) async {
     try {
       final snap = await _firestore
@@ -157,3 +175,4 @@ class AttendanceRemoteDataSourceImpl implements AttendanceRemoteDataSource {
     }
   }
 }
+

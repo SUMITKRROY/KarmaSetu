@@ -9,9 +9,9 @@ abstract interface class AttendanceLocalDataSource {
     bool ascending = false,
   });
 
-  Future<void> saveAttendance(AttendanceModel model);
+  Future<void> saveAttendance(AttendanceModel model, {bool? isSynced});
 
-  Future<void> saveAttendanceBatch(List<AttendanceModel> models);
+  Future<void> saveAttendanceBatch(List<AttendanceModel> models, {bool isSynced = true});
 
   Future<AttendanceModel?> getTodayAttendance({
     required String uid,
@@ -52,13 +52,14 @@ class AttendanceLocalDataSourceImpl implements AttendanceLocalDataSource {
   }
 
   @override
-  Future<void> saveAttendance(AttendanceModel model) async {
-    await _attendanceTable.insertOrUpdate(model.toSqfliteMap());
+  Future<void> saveAttendance(AttendanceModel model, {bool? isSynced}) async {
+    final syncedVal = isSynced != null ? (isSynced ? 1 : 0) : (model.isSynced ? 1 : 0);
+    await _attendanceTable.insertOrUpdate(model.toSqfliteMap(isSynced: syncedVal));
   }
 
   @override
-  Future<void> saveAttendanceBatch(List<AttendanceModel> models) async {
-    final maps = models.map((m) => m.toSqfliteMap()).toList();
+  Future<void> saveAttendanceBatch(List<AttendanceModel> models, {bool isSynced = true}) async {
+    final maps = models.map((m) => m.toSqfliteMap(isSynced: isSynced ? 1 : 0)).toList();
     await _attendanceTable.insertBatch(maps);
   }
 

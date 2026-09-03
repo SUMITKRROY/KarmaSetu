@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_bloc/flutter_bloc.dart';
 import '../../../../app/theme/app_colors.dart';
+import '../../../auth/presentation/bloc/auth_bloc.dart';
 import '../../../leave/domain/entities/leave_approval_request.dart';
 import '../../../leave/presentation/pages/leave_detail_page.dart';
 import '../../../leave/presentation/providers/leave_approval_service.dart';
@@ -26,6 +28,7 @@ class _ApproverDashboardPageState extends State<ApproverDashboardPage> {
   void initState() {
     super.initState();
     _service.addListener(_onServiceChanged);
+    _service.refresh();
   }
 
   @override
@@ -84,84 +87,109 @@ class _ApproverDashboardPageState extends State<ApproverDashboardPage> {
     final recentActivities = _service.recentActivities;
     final useGridOverview = _service.useGridOverview;
 
-    return Scaffold(
-      backgroundColor: const Color(0xFFF7F9FC),
-      body: SafeArea(
-        child: RefreshIndicator(
-          onRefresh: () async {
-            await _service.refresh();
-          },
-          child: SingleChildScrollView(
-            physics: const AlwaysScrollableScrollPhysics(),
-            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                // 1. Top Header (Image 1 & 2)
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+    return BlocBuilder<AuthBloc, AuthState>(
+      builder: (context, authState) {
+        final user = (authState is AuthAuthenticated) ? authState.user : null;
+        final approverName = (user != null && user.name.trim().isNotEmpty)
+            ? user.name.trim()
+            : 'Approver';
+        final initials = approverName
+            .split(' ')
+            .where((p) => p.isNotEmpty)
+            .map((e) => e[0])
+            .take(2)
+            .join()
+            .toUpperCase();
+
+        final hour = DateTime.now().hour;
+        final greeting = hour < 12
+            ? 'Good Morning,'
+            : (hour < 17 ? 'Good Afternoon,' : 'Good Evening,');
+
+        return Scaffold(
+          backgroundColor: const Color(0xFFF7F9FC),
+          body: SafeArea(
+            child: RefreshIndicator(
+              onRefresh: () async {
+                await _service.refresh();
+              },
+              child: SingleChildScrollView(
+                physics: const AlwaysScrollableScrollPhysics(),
+                padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+                child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Column(
+                    // 1. Top Header (Image 1 & 2)
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        const Text(
-                          'Good Morning,',
-                          style: TextStyle(
-                            fontSize: 14,
-                            fontWeight: FontWeight.w500,
-                            color: AppColors.textSecondary,
-                          ),
-                        ),
-                        const SizedBox(height: 2),
-                        Text(
-                          useGridOverview ? 'Good Morning, Rahul' : 'Approver Dashboard',
-                          style: const TextStyle(
-                            fontSize: 22,
-                            fontWeight: FontWeight.w800,
-                            color: AppColors.textPrimary,
-                            letterSpacing: -0.4,
-                          ),
-                        ),
-                        if (useGridOverview) ...[
-                          const SizedBox(height: 2),
-                          const Text(
-                            'Welcome back!',
-                            style: TextStyle(
-                              fontSize: 13,
-                              color: AppColors.textSecondary,
+                        Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              greeting,
+                              style: const TextStyle(
+                                fontSize: 14,
+                                fontWeight: FontWeight.w500,
+                                color: AppColors.textSecondary,
+                              ),
                             ),
-                          ),
-                        ],
+                            const SizedBox(height: 2),
+                            Text(
+                              approverName,
+                              style: const TextStyle(
+                                fontSize: 22,
+                                fontWeight: FontWeight.w800,
+                                color: AppColors.textPrimary,
+                                letterSpacing: -0.4,
+                              ),
+                            ),
+                            const SizedBox(height: 2),
+                            const Text(
+                              'Approver Dashboard',
+                              style: TextStyle(
+                                fontSize: 13,
+                                color: AppColors.textSecondary,
+                                fontWeight: FontWeight.w500,
+                              ),
+                            ),
+                          ],
+                        ),
+                        Row(
+                          children: [
+                            // Toggle variant preview button
+                            IconButton(
+                              tooltip: 'Toggle Overview Variant',
+                              icon: Icon(
+                                useGridOverview ? Icons.view_agenda_outlined : Icons.grid_view_rounded,
+                                color: AppColors.textSecondary,
+                                size: 20,
+                              ),
+                              onPressed: () {
+                                _service.toggleOverviewVariant();
+                              },
+                            ),
+                            InkWell(
+                              onTap: widget.onNavigateToProfile,
+                              borderRadius: BorderRadius.circular(20),
+                              child: CircleAvatar(
+                                radius: 18,
+                                backgroundColor: const Color(0xFF083E2F),
+                                child: Text(
+                                  initials.isNotEmpty ? initials : 'AP',
+                                  style: const TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.w700,
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
                       ],
                     ),
-                    Row(
-                      children: [
-                        // Toggle variant preview button
-                        IconButton(
-                          tooltip: 'Toggle Overview Variant',
-                          icon: Icon(
-                            useGridOverview ? Icons.view_agenda_outlined : Icons.grid_view_rounded,
-                            color: AppColors.textSecondary,
-                            size: 20,
-                          ),
-                          onPressed: () {
-                            _service.toggleOverviewVariant();
-                          },
-                        ),
-                        InkWell(
-                          onTap: widget.onNavigateToProfile,
-                          borderRadius: BorderRadius.circular(20),
-                          child: CircleAvatar(
-                            radius: 18,
-                            backgroundColor: const Color(0xFF083E2F),
-                            child: const Icon(Icons.person, color: Colors.white, size: 20),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ],
-                ),
                 const SizedBox(height: 20),
 
                 // 2. Overview Section
@@ -273,7 +301,9 @@ class _ApproverDashboardPageState extends State<ApproverDashboardPage> {
         ),
       ),
     );
-  }
+  },
+);
+}
 
   /// Vertical overview cards (Image 1)
   Widget _buildVerticalOverview() {

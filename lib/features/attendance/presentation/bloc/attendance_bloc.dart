@@ -1,6 +1,8 @@
 import 'dart:async';
+import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
+import '../../../../core/services/connectivity_service.dart';
 import '../../../../core/services/location_service.dart';
 import '../../../../core/utils/date_utils.dart';
 import '../../data/models/attendance_model.dart';
@@ -11,14 +13,20 @@ import 'attendance_state.dart';
 class AttendanceBloc extends Bloc<AttendanceEvent, AttendanceState> {
   final AttendanceRepository _attendanceRepository;
   final LocationService _locationService;
+  final ConnectivityService _connectivityService;
   StreamSubscription<AttendanceModel?>? _todayStreamSubscription;
+  StreamSubscription<bool>? _connectivitySubscription;
 
   AttendanceBloc({
     required AttendanceRepository attendanceRepository,
     LocationService? locationService,
+    ConnectivityService? connectivityService,
   })  : _attendanceRepository = attendanceRepository,
         _locationService = locationService ?? LocationService.instance,
-        super(AttendanceState()) {
+        _connectivityService = connectivityService ?? ConnectivityService.instance,
+        super(AttendanceState(
+          isOffline: !(connectivityService ?? ConnectivityService.instance).hasConnection,
+        )) {
     on<CheckTodayAttendanceRequested>(_onCheckTodayAttendanceRequested);
     on<RefreshAttendanceLocationRequested>(_onRefreshAttendanceLocationRequested);
     on<SelfieCaptured>(_onSelfieCaptured);
@@ -28,6 +36,68 @@ class AttendanceBloc extends Bloc<AttendanceEvent, AttendanceState> {
     on<AttendanceStreamUpdated>(_onAttendanceStreamUpdated);
     on<LoadAttendanceHistoryRequested>(_onLoadAttendanceHistoryRequested);
     on<LoadMonthAttendanceRequested>(_onLoadMonthAttendanceRequested);
+    on<ConnectivityChanged>(_onConnectivityChanged);
+    on<SyncUnsyncedAttendanceRequested>(_onSyncUnsyncedAttendanceRequested);
+
+    _initConnectivityListener();
+  }
+
+  void _initConnectivityListener() {
+    _connectivitySubscription = _connectivityService.onConnectivityChanged.listen((isConnected) {
+      add(ConnectivityChanged(isConnected));
+    });
+  }
+
+  Future<void> _onConnectivityChanged(
+    ConnectivityChanged event,
+    Emitter<AttendanceState> emit,
+  ) async {
+    final wasOffline = state.isOffline;
+    emit(state.copyWith(isOffline: !event.isConnected));
+
+    if (event.isConnected && wasOffline) {
+      debugPrint('[AttendanceBloc] Connection restored! Triggering auto-sync...');
+      add(const SyncUnsyncedAttendanceRequested());
+    }
+  }
+
+  Future<void> _onSyncUnsyncedAttendanceRequested(
+    SyncUnsyncedAttendanceRequested event,
+    Emitter<AttendanceState> emit,
+  ) async {
+    if (state.isSyncing) return;
+    emit(state.copyWith(isSyncing: true));
+
+    try {
+      final syncedCount = await _attendanceRepository.syncUnsyncedRecords();
+      debugPrint('[AttendanceBloc] Auto-synced $syncedCount offline records.');
+
+      if (syncedCount > 0) {
+        // Refresh today attendance to reflect synced state
+        final todayDate = AppDateUtils.getCurrentLocalDate();
+        final currentAttendance = state.todayAttendance;
+        if (currentAttendance != null) {
+          final refreshed = await _attendanceRepository.getTodayAttendance(
+            uid: currentAttendance.uid,
+            date: todayDate,
+          );
+          emit(state.copyWith(
+            todayAttendance: refreshed ?? currentAttendance.copyWith(isSynced: true),
+            isSyncing: false,
+            successMessage: '$syncedCount offline attendance record(s) synced to server!',
+          ));
+        } else {
+          emit(state.copyWith(
+            isSyncing: false,
+            successMessage: '$syncedCount offline attendance record(s) synced to server!',
+          ));
+        }
+      } else {
+        emit(state.copyWith(isSyncing: false));
+      }
+    } catch (e) {
+      emit(state.copyWith(isSyncing: false));
+    }
   }
 
   Future<void> _onCheckTodayAttendanceRequested(
@@ -38,21 +108,30 @@ class AttendanceBloc extends Bloc<AttendanceEvent, AttendanceState> {
     debugPrint('[KarmaSetu] Current attendance date: $todayDate');
     debugPrint('[KarmaSetu] Current user UID: ${event.uid}');
 
-    // Immediately clear any existing today attendance so stale data is never shown while loading
+    // If we already have valid today attendance in memory for todayDate, keep it so it doesn't flicker or wipe out
+    final existingToday = state.verifiedTodayAttendance;
+    final hasValidToday = existingToday != null && existingToday.date == todayDate;
+
     emit(state.copyWith(
-      clearTodayAttendance: true,
+      clearTodayAttendance: !hasValidToday,
       activeDate: todayDate,
-      isLoadingToday: true,
+      isLoadingToday: !hasValidToday,
       clearMessages: true,
     ));
 
     // Cancel existing stream before subscribing
     await _todayStreamSubscription?.cancel();
-    _todayStreamSubscription = _attendanceRepository
-        .streamTodayAttendance(uid: event.uid, date: todayDate)
-        .listen((attendance) {
-      add(AttendanceStreamUpdated(attendance));
-    });
+    try {
+      _todayStreamSubscription = _attendanceRepository
+          .streamTodayAttendance(uid: event.uid, date: todayDate)
+          .listen((attendance) {
+        add(AttendanceStreamUpdated(attendance));
+      }, onError: (error) {
+        debugPrint('[KarmaSetu] streamTodayAttendance error: $error');
+      });
+    } catch (e) {
+      debugPrint('[KarmaSetu] Failed to subscribe to attendance stream: $e');
+    }
 
     try {
       final attendance = await _attendanceRepository.getTodayAttendance(
@@ -67,7 +146,7 @@ class AttendanceBloc extends Bloc<AttendanceEvent, AttendanceState> {
       }
 
       // Strictly ensure record belongs to todayDate
-      final validAttendance = isFound ? attendance : null;
+      final validAttendance = isFound ? attendance : (hasValidToday ? existingToday : null);
 
       // Also proactively fetch current month's attendance history for live dashboard stats
       final now = DateTime.now();
@@ -110,18 +189,36 @@ class AttendanceBloc extends Bloc<AttendanceEvent, AttendanceState> {
     Emitter<AttendanceState> emit,
   ) {
     final currentToday = AppDateUtils.getCurrentLocalDate();
+
+    // Guard: If remote stream emits null, NEVER wipe out existing local/offline attendance!
+    if (event.attendance == null && state.verifiedTodayAttendance != null) {
+      return;
+    }
+
     // Only accept streamed attendance if it matches today's date
     final validAttendance = (event.attendance != null && event.attendance!.date == currentToday)
         ? event.attendance
         : null;
+
+    final existing = state.verifiedTodayAttendance;
+    // Guard: If local record is checked out but not synced, don't let remote revert it
+    if (existing != null && !existing.isSynced && existing.isCheckedOut) {
+      if (validAttendance != null && !validAttendance.isCheckedOut) {
+        return;
+      }
+    }
+
+    if (validAttendance == null && existing != null) {
+      return;
+    }
 
     final updatedHistory = validAttendance != null
         ? _updateHistoryList(state.history, validAttendance)
         : state.history;
 
     emit(state.copyWith(
-      todayAttendance: validAttendance,
-      clearTodayAttendance: validAttendance == null,
+      todayAttendance: validAttendance ?? existing,
+      clearTodayAttendance: validAttendance == null && existing == null,
       activeDate: currentToday,
       history: updatedHistory,
       isLoadingToday: false,
@@ -191,9 +288,26 @@ class AttendanceBloc extends Bloc<AttendanceEvent, AttendanceState> {
         return;
       }
 
-      // Ensure we have current location
+      // Mandatory condition 1: Selfie image verification
+      final selfie = event.selfiePath ?? state.selfiePath;
+      if (selfie == null || !File(selfie).existsSync()) {
+        emit(state.copyWith(
+          submissionStatus: AttendanceSubmissionStatus.failure,
+          errorMessage: 'Selfie photo is mandatory for Check-In. Please take a photo first.',
+        ));
+        return;
+      }
+
+      // Mandatory condition 2: GPS Location verification
       LocationResult? location = state.currentLocation;
       location ??= await _locationService.getCurrentLocationWithAddress();
+      if (location == null) {
+        emit(state.copyWith(
+          submissionStatus: AttendanceSubmissionStatus.failure,
+          errorMessage: 'GPS Location is mandatory for Check-In. Please turn on GPS and grant location permission.',
+        ));
+        return;
+      }
 
       final docId = '${event.uid}_$todayDate';
 
@@ -203,10 +317,10 @@ class AttendanceBloc extends Bloc<AttendanceEvent, AttendanceState> {
         employeeId: event.employeeId,
         date: todayDate,
         checkIn: now,
-        checkInLatitude: location?.latitude ?? 12.9716,
-        checkInLongitude: location?.longitude ?? 77.5946,
-        checkInLocation: location?.formattedAddress ?? 'Bangalore Office Campus',
-        checkInSelfie: event.selfiePath ?? state.selfiePath,
+        checkInLatitude: location.latitude,
+        checkInLongitude: location.longitude,
+        checkInLocation: location.formattedAddress,
+        checkInSelfie: selfie,
         status: 'CHECKED_IN',
         workingMinutes: 0,
         createdAt: now,
@@ -216,12 +330,16 @@ class AttendanceBloc extends Bloc<AttendanceEvent, AttendanceState> {
       final saved = await _attendanceRepository.checkIn(model);
       final updatedHistory = _updateHistoryList(state.history, saved);
 
+      final message = saved.isSynced
+          ? 'Punched in successfully!'
+          : 'Punched in locally (Offline Mode). Stored in local database.';
+
       emit(state.copyWith(
         todayAttendance: saved,
         activeDate: todayDate,
         history: updatedHistory,
         submissionStatus: AttendanceSubmissionStatus.success,
-        successMessage: 'Punched in successfully!',
+        successMessage: message,
         currentLocation: location,
         clearSelfie: true,
       ));
@@ -256,8 +374,26 @@ class AttendanceBloc extends Bloc<AttendanceEvent, AttendanceState> {
         return;
       }
 
+      // Mandatory condition 1: Selfie image verification
+      final selfie = event.selfiePath ?? state.selfiePath;
+      if (selfie == null || !File(selfie).existsSync()) {
+        emit(state.copyWith(
+          submissionStatus: AttendanceSubmissionStatus.failure,
+          errorMessage: 'Selfie photo is mandatory for Check-Out. Please take a photo first.',
+        ));
+        return;
+      }
+
+      // Mandatory condition 2: GPS Location verification
       LocationResult? location = state.currentLocation;
       location ??= await _locationService.getCurrentLocationWithAddress();
+      if (location == null) {
+        emit(state.copyWith(
+          submissionStatus: AttendanceSubmissionStatus.failure,
+          errorMessage: 'GPS Location is mandatory for Check-Out. Please turn on GPS and grant location permission.',
+        ));
+        return;
+      }
 
       final checkInTime = currentTodayRecord.checkIn;
       final workingMinutes = now.difference(checkInTime).inMinutes;
@@ -269,21 +405,25 @@ class AttendanceBloc extends Bloc<AttendanceEvent, AttendanceState> {
       final updated = await _attendanceRepository.checkOut(
         attendanceId: targetDocId,
         checkOutTime: now,
-        latitude: location?.latitude ?? 12.9716,
-        longitude: location?.longitude ?? 77.5946,
-        location: location?.formattedAddress ?? 'Bangalore Office Campus',
-        selfiePath: event.selfiePath ?? state.selfiePath,
+        latitude: location.latitude,
+        longitude: location.longitude,
+        location: location.formattedAddress,
+        selfiePath: selfie,
         workingMinutes: workingMinutes > 0 ? workingMinutes : 1,
       );
 
       final updatedHistory = _updateHistoryList(state.history, updated);
+
+      final message = updated.isSynced
+          ? 'Punched out successfully!'
+          : 'Punched out locally (Offline Mode). Stored in local database.';
 
       emit(state.copyWith(
         todayAttendance: updated,
         activeDate: todayDate,
         history: updatedHistory,
         submissionStatus: AttendanceSubmissionStatus.success,
-        successMessage: 'Punched out successfully!',
+        successMessage: message,
         currentLocation: location,
       ));
     } catch (e) {
@@ -360,6 +500,7 @@ class AttendanceBloc extends Bloc<AttendanceEvent, AttendanceState> {
   @override
   Future<void> close() {
     _todayStreamSubscription?.cancel();
+    _connectivitySubscription?.cancel();
     return super.close();
   }
 }

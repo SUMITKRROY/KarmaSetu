@@ -50,15 +50,19 @@ class LeaveRepositoryImpl implements LeaveRepository {
 
   @override
   Future<List<LeaveModel>> getAllLeaves() async {
+    // 1. Fetch from local SQLite database first
+    final localLeaves = await _localDataSource.getAllLeaves();
+
+    // 2. Fetch and sync from Firestore
     try {
       final remoteLeaves = await _remoteDataSource.getAllLeaves();
       for (final leave in remoteLeaves) {
         await _localDataSource.saveLeave(leave);
         await _localDataSource.markSynced(leave.leaveId);
       }
-      return remoteLeaves;
+      return await _localDataSource.getAllLeaves();
     } catch (_) {
-      return [];
+      return localLeaves;
     }
   }
 

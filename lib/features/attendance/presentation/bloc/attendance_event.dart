@@ -73,3 +73,14 @@ final class LoadMonthAttendanceRequested extends AttendanceEvent {
     required this.month,
   });
 }
+
+final class ConnectivityChanged extends AttendanceEvent {
+  final bool isConnected;
+
+  const ConnectivityChanged(this.isConnected);
+}
+
+final class SyncUnsyncedAttendanceRequested extends AttendanceEvent {
+  const SyncUnsyncedAttendanceRequested();
+}
+

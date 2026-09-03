@@ -264,6 +264,7 @@ class LeaveApprovalService extends ChangeNotifier {
   }
 
   Future<void> refresh() async {
+    _subscribeToLeavesStream();
     await _loadFromRepository();
   }
 

@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_bloc/flutter_bloc.dart';
 import '../../../../app/theme/app_colors.dart';
+import '../../../auth/presentation/bloc/auth_bloc.dart';
 import '../../domain/entities/leave_approval_request.dart';
 import '../providers/leave_approval_service.dart';
 import '../widgets/approval_dialogs.dart';
@@ -32,6 +34,7 @@ class _LeaveRequestsPageState extends State<LeaveRequestsPage> {
     super.initState();
     _service.addListener(_onServiceChanged);
     _searchController.addListener(() => setState(() {}));
+    _service.refresh();
   }
 
   @override
@@ -165,10 +168,34 @@ class _LeaveRequestsPageState extends State<LeaveRequestsPage> {
           ),
           Padding(
             padding: const EdgeInsets.only(right: 16),
-            child: CircleAvatar(
-              radius: 18,
-              backgroundColor: const Color(0xFF083E2F),
-              child: const Icon(Icons.person, color: Colors.white, size: 20),
+            child: BlocBuilder<AuthBloc, AuthState>(
+              builder: (context, authState) {
+                final user = (authState is AuthAuthenticated) ? authState.user : null;
+                final name = user?.name.isNotEmpty == true ? user!.name : 'Approver';
+                final initials = name
+                    .split(' ')
+                    .where((p) => p.isNotEmpty)
+                    .map((e) => e[0])
+                    .take(2)
+                    .join()
+                    .toUpperCase();
+                return InkWell(
+                  onTap: widget.onNavigateProfile,
+                  borderRadius: BorderRadius.circular(20),
+                  child: CircleAvatar(
+                    radius: 18,
+                    backgroundColor: const Color(0xFF083E2F),
+                    child: Text(
+                      initials.isNotEmpty ? initials : 'AP',
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 12,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ),
+                );
+              },
             ),
           ),
         ],

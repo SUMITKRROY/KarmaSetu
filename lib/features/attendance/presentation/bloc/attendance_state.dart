@@ -24,6 +24,9 @@ class AttendanceState {
   final List<AttendanceModel> history;
   final bool isLoadingHistory;
   final DateTime lastRefreshed;
+  final bool isOffline;
+  final bool isSyncing;
+  final int unsyncedCount;
 
   AttendanceState({
     this.todayAttendance,
@@ -38,6 +41,9 @@ class AttendanceState {
     this.history = const [],
     this.isLoadingHistory = false,
     DateTime? lastRefreshed,
+    this.isOffline = false,
+    this.isSyncing = false,
+    this.unsyncedCount = 0,
   }) : lastRefreshed = lastRefreshed ?? DateTime.now();
 
   /// Strictly verifies that [todayAttendance] matches the current local date.
@@ -71,6 +77,9 @@ class AttendanceState {
     List<AttendanceModel>? history,
     bool? isLoadingHistory,
     DateTime? lastRefreshed,
+    bool? isOffline,
+    bool? isSyncing,
+    int? unsyncedCount,
   }) {
     return AttendanceState(
       todayAttendance: clearTodayAttendance ? null : (todayAttendance ?? this.todayAttendance),
@@ -85,6 +94,9 @@ class AttendanceState {
       history: history ?? this.history,
       isLoadingHistory: isLoadingHistory ?? this.isLoadingHistory,
       lastRefreshed: lastRefreshed ?? this.lastRefreshed,
+      isOffline: isOffline ?? this.isOffline,
+      isSyncing: isSyncing ?? this.isSyncing,
+      unsyncedCount: unsyncedCount ?? this.unsyncedCount,
     );
   }
 }

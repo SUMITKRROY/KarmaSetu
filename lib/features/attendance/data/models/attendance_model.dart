@@ -20,6 +20,7 @@ class AttendanceModel {
   final int workingMinutes;
   final DateTime createdAt;
   final DateTime updatedAt;
+  final bool isSynced;
 
   const AttendanceModel({
     required this.attendanceId,
@@ -40,6 +41,7 @@ class AttendanceModel {
     this.workingMinutes = 0,
     required this.createdAt,
     required this.updatedAt,
+    this.isSynced = false,
   });
 
   bool get isCheckedIn => checkOut == null;
@@ -64,6 +66,7 @@ class AttendanceModel {
     int? workingMinutes,
     DateTime? createdAt,
     DateTime? updatedAt,
+    bool? isSynced,
   }) {
     return AttendanceModel(
       attendanceId: attendanceId ?? this.attendanceId,
@@ -84,6 +87,7 @@ class AttendanceModel {
       workingMinutes: workingMinutes ?? this.workingMinutes,
       createdAt: createdAt ?? this.createdAt,
       updatedAt: updatedAt ?? this.updatedAt,
+      isSynced: isSynced ?? this.isSynced,
     );
   }
 
@@ -147,10 +151,11 @@ class AttendanceModel {
       workingMinutes: (data['workingMinutes'] as num?)?.toInt() ?? 0,
       createdAt: parseDate(data['createdAt'], now),
       updatedAt: parseDate(data['updatedAt'], now),
+      isSynced: true,
     );
   }
 
-  Map<String, dynamic> toSqfliteMap({int isSynced = 0, String syncError = ''}) {
+  Map<String, dynamic> toSqfliteMap({int? isSynced, String syncError = ''}) {
     return {
       'attendanceId': attendanceId,
       'uid': uid,
@@ -168,7 +173,7 @@ class AttendanceModel {
       'checkOutSelfie': checkOutSelfie ?? '',
       'status': status,
       'workingMinutes': workingMinutes,
-      'isSynced': isSynced,
+      'isSynced': isSynced ?? (this.isSynced ? 1 : 0),
       'syncError': syncError,
       'createdAt': createdAt.toIso8601String(),
       'updatedAt': updatedAt.toIso8601String(),
@@ -211,6 +216,7 @@ class AttendanceModel {
       workingMinutes: (map['workingMinutes'] as num?)?.toInt() ?? 0,
       createdAt: parseDate(map['createdAt'], now),
       updatedAt: parseDate(map['updatedAt'], now),
+      isSynced: (map['isSynced'] as int? ?? 0) == 1,
     );
   }
 

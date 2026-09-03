@@ -7,6 +7,8 @@ abstract interface class LeaveLocalDataSource {
     bool ascending = false,
   });
 
+  Future<List<LeaveModel>> getAllLeaves({bool ascending = false});
+
   Future<void> saveLeave(LeaveModel model);
 
   Future<void> saveLeaveBatch(List<LeaveModel> models);
@@ -38,6 +40,12 @@ class LeaveLocalDataSourceImpl implements LeaveLocalDataSource {
     bool ascending = false,
   }) async {
     final maps = await _leaveTable.getAllForUser(uid, ascending: ascending);
+    return maps.map((m) => LeaveModel.fromSqfliteMap(m)).toList();
+  }
+
+  @override
+  Future<List<LeaveModel>> getAllLeaves({bool ascending = false}) async {
+    final maps = await _leaveTable.getAll(ascending: ascending);
     return maps.map((m) => LeaveModel.fromSqfliteMap(m)).toList();
   }
 

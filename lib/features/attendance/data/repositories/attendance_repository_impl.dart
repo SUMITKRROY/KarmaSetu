@@ -1,3 +1,4 @@
+import '../../../../core/network/network_info.dart';
 import '../../domain/repositories/attendance_repository.dart';
 import '../datasources/attendance_local_datasource.dart';
 import '../datasources/attendance_remote_datasource.dart';
@@ -6,12 +7,15 @@ import '../models/attendance_model.dart';
 class AttendanceRepositoryImpl implements AttendanceRepository {
   final AttendanceRemoteDataSource _remoteDataSource;
   final AttendanceLocalDataSource _localDataSource;
+  final NetworkInfo _networkInfo;
 
   AttendanceRepositoryImpl({
     required AttendanceRemoteDataSource remoteDataSource,
     AttendanceLocalDataSource? localDataSource,
+    NetworkInfo? networkInfo,
   })  : _remoteDataSource = remoteDataSource,
-        _localDataSource = localDataSource ?? AttendanceLocalDataSourceImpl();
+        _localDataSource = localDataSource ?? AttendanceLocalDataSourceImpl(),
+        _networkInfo = networkInfo ?? NetworkInfoImpl();
 
   @override
   Future<AttendanceModel?> getTodayAttendance({
@@ -24,11 +28,17 @@ class AttendanceRepositoryImpl implements AttendanceRepository {
       return local;
     }
 
+    // Check internet before remote query
+    final isConnected = await _networkInfo.isConnected;
+    if (!isConnected) {
+      return null;
+    }
+
     // Fallback to remote and cache locally
     try {
       final remote = await _remoteDataSource.getTodayAttendance(uid: uid, date: date);
       if (remote != null) {
-        await _localDataSource.saveAttendance(remote);
+        await _localDataSource.saveAttendance(remote, isSynced: true);
       }
       return remote;
     } catch (_) {
@@ -43,7 +53,7 @@ class AttendanceRepositoryImpl implements AttendanceRepository {
   }) {
     return _remoteDataSource.streamTodayAttendance(uid: uid, date: date).map((model) {
       if (model != null) {
-        _localDataSource.saveAttendance(model);
+        _localDataSource.saveAttendance(model, isSynced: true);
       }
       return model;
     });
@@ -51,16 +61,25 @@ class AttendanceRepositoryImpl implements AttendanceRepository {
 
   @override
   Future<AttendanceModel> checkIn(AttendanceModel model) async {
-    // Save to local SQLite table immediately
-    await _localDataSource.saveAttendance(model);
+    final isConnected = await _networkInfo.isConnected;
+
+    if (!isConnected) {
+      // Offline mode: Store locally with isSynced = 0
+      final offlineModel = model.copyWith(isSynced: false);
+      await _localDataSource.saveAttendance(offlineModel, isSynced: false);
+      return offlineModel;
+    }
 
     try {
       final saved = await _remoteDataSource.checkIn(model);
-      await _localDataSource.saveAttendance(saved);
-      return saved;
+      final syncedModel = saved.copyWith(isSynced: true);
+      await _localDataSource.saveAttendance(syncedModel, isSynced: true);
+      return syncedModel;
     } catch (_) {
-      // Return locally saved record if offline
-      return model;
+      // Fallback: Store locally if network request fails
+      final offlineModel = model.copyWith(isSynced: false);
+      await _localDataSource.saveAttendance(offlineModel, isSynced: false);
+      return offlineModel;
     }
   }
 
@@ -74,62 +93,96 @@ class AttendanceRepositoryImpl implements AttendanceRepository {
     String? selfiePath,
     required int workingMinutes,
   }) async {
-    try {
-      final updated = await _remoteDataSource.checkOut(
-        attendanceId: attendanceId,
-        checkOutTime: checkOutTime,
-        latitude: latitude,
-        longitude: longitude,
-        location: location,
-        selfiePath: selfiePath,
-        workingMinutes: workingMinutes,
-      );
+    final todayDate = AttendanceModel.formatDate(checkOutTime);
+    final parts = attendanceId.split('_');
+    final uid = parts.isNotEmpty ? parts[0] : '';
+    final local = await _localDataSource.getTodayAttendance(uid: uid, date: todayDate);
 
-      await _localDataSource.saveAttendance(updated);
-      return updated;
-    } catch (_) {
-      // Update local record if offline
-      final todayDate = AttendanceModel.formatDate(checkOutTime);
-      final parts = attendanceId.split('_');
-      final uid = parts.isNotEmpty ? parts[0] : '';
-      final local = await _localDataSource.getTodayAttendance(uid: uid, date: todayDate);
+    final isConnected = await _networkInfo.isConnected;
 
-      if (local != null) {
-        final updatedLocal = local.copyWith(
-          checkOut: checkOutTime,
-          checkOutLatitude: latitude,
-          checkOutLongitude: longitude,
-          checkOutLocation: location,
-          checkOutSelfie: selfiePath,
+    if (isConnected) {
+      try {
+        final updated = await _remoteDataSource.checkOut(
+          attendanceId: attendanceId,
+          checkOutTime: checkOutTime,
+          latitude: latitude,
+          longitude: longitude,
+          location: location,
+          selfiePath: selfiePath,
           workingMinutes: workingMinutes,
-          status: 'PRESENT',
-          updatedAt: DateTime.now(),
         );
-        await _localDataSource.saveAttendance(updatedLocal);
-        return updatedLocal;
+
+        final syncedModel = updated.copyWith(isSynced: true);
+        await _localDataSource.saveAttendance(syncedModel, isSynced: true);
+        return syncedModel;
+      } catch (_) {
+        // Fallback to offline local update on remote exception
       }
-      rethrow;
+    }
+
+    // Offline checkout mode
+    if (local != null) {
+      final updatedLocal = local.copyWith(
+        checkOut: checkOutTime,
+        checkOutLatitude: latitude,
+        checkOutLongitude: longitude,
+        checkOutLocation: location,
+        checkOutSelfie: selfiePath,
+        workingMinutes: workingMinutes,
+        status: 'PRESENT',
+        updatedAt: DateTime.now(),
+        isSynced: false,
+      );
+      await _localDataSource.saveAttendance(updatedLocal, isSynced: false);
+      return updatedLocal;
+    } else {
+      // Create and save offline checkout model
+      final offlineModel = AttendanceModel(
+        attendanceId: attendanceId,
+        uid: uid,
+        employeeId: '',
+        date: todayDate,
+        checkIn: checkOutTime,
+        checkOut: checkOutTime,
+        checkInLatitude: latitude,
+        checkInLongitude: longitude,
+        checkInLocation: location,
+        checkOutLatitude: latitude,
+        checkOutLongitude: longitude,
+        checkOutLocation: location,
+        checkOutSelfie: selfiePath,
+        status: 'PRESENT',
+        workingMinutes: workingMinutes,
+        createdAt: checkOutTime,
+        updatedAt: checkOutTime,
+        isSynced: false,
+      );
+      await _localDataSource.saveAttendance(offlineModel, isSynced: false);
+      return offlineModel;
     }
   }
 
   @override
   Future<List<AttendanceModel>> getAttendanceHistory(String uid) async {
-    try {
-      final remoteHistory = await _remoteDataSource.getAttendanceHistory(uid);
-      for (final item in remoteHistory) {
-        await _localDataSource.saveAttendance(item);
-      }
-      return remoteHistory;
-    } catch (_) {
-      final now = DateTime.now();
-      final startDate = '${now.year - 1}-01-01';
-      final endDate = '${now.year + 1}-12-31';
-      return await _localDataSource.getAttendanceForMonth(
-        uid: uid,
-        startDate: startDate,
-        endDate: endDate,
-      );
+    final isConnected = await _networkInfo.isConnected;
+    if (isConnected) {
+      try {
+        final remoteHistory = await _remoteDataSource.getAttendanceHistory(uid);
+        for (final item in remoteHistory) {
+          await _localDataSource.saveAttendance(item, isSynced: true);
+        }
+        return remoteHistory;
+      } catch (_) {}
     }
+
+    final now = DateTime.now();
+    final startDate = '${now.year - 1}-01-01';
+    final endDate = '${now.year + 1}-12-31';
+    return await _localDataSource.getAttendanceForMonth(
+      uid: uid,
+      startDate: startDate,
+      endDate: endDate,
+    );
   }
 
   @override
@@ -145,23 +198,25 @@ class AttendanceRepositoryImpl implements AttendanceRepository {
       endDate: endDate,
     );
 
-    // 2. Fetch remote in background/sync and save to local if needed
-    try {
-      final remoteList = await _remoteDataSource.getAttendanceHistory(uid);
-      for (final item in remoteList) {
-        await _localDataSource.saveAttendance(item);
-      }
+    // 2. Fetch remote in background/sync and save to local if connected
+    final isConnected = await _networkInfo.isConnected;
+    if (isConnected) {
+      try {
+        final remoteList = await _remoteDataSource.getAttendanceHistory(uid);
+        for (final item in remoteList) {
+          await _localDataSource.saveAttendance(item, isSynced: true);
+        }
 
-      // Re-query local database after sync
-      return await _localDataSource.getAttendanceForMonth(
-        uid: uid,
-        startDate: startDate,
-        endDate: endDate,
-      );
-    } catch (_) {
-      // If offline or network error, return local SQLite records directly
-      return localList;
+        // Re-query local database after sync
+        return await _localDataSource.getAttendanceForMonth(
+          uid: uid,
+          startDate: startDate,
+          endDate: endDate,
+        );
+      } catch (_) {}
     }
+
+    return localList;
   }
 
   @override
@@ -171,17 +226,22 @@ class AttendanceRepositoryImpl implements AttendanceRepository {
 
   @override
   Future<int> syncUnsyncedRecords() async {
+    final isConnected = await _networkInfo.isConnected;
+    if (!isConnected) {
+      return 0;
+    }
+
     try {
       final unsynced = await _localDataSource.getUnsyncedRecords();
       int syncedCount = 0;
 
       for (final record in unsynced) {
         try {
-          await _remoteDataSource.checkIn(record);
+          await _remoteDataSource.syncAttendance(record);
           await _localDataSource.markSynced(record.attendanceId);
           syncedCount++;
-        } catch (_) {
-          // Continue with next record
+        } catch (e) {
+          // If individual upload fails, proceed to next
         }
       }
 
@@ -191,3 +251,4 @@ class AttendanceRepositoryImpl implements AttendanceRepository {
     }
   }
 }
+

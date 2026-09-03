@@ -1,7 +1,10 @@
+import 'dart:async';
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:path/path.dart' as p;
+import 'package:path_provider/path_provider.dart';
 import '../../../../app/theme/app_colors.dart';
 import '../../../../app/theme/app_text_styles.dart';
 import '../../../../core/services/location_service.dart';
@@ -21,11 +24,18 @@ class AttendancePage extends StatefulWidget {
 
 class _AttendancePageState extends State<AttendancePage> with WidgetsBindingObserver {
   final ImagePicker _picker = ImagePicker();
+  Timer? _clockTimer;
 
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    // Live ticking timer for real-time offline/online duration tracking
+    _clockTimer = Timer.periodic(const Duration(seconds: 1), (_) {
+      if (mounted) {
+        setState(() {});
+      }
+    });
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _initAttendanceData();
     });
@@ -34,6 +44,7 @@ class _AttendancePageState extends State<AttendancePage> with WidgetsBindingObse
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    _clockTimer?.cancel();
     super.dispose();
   }
 
@@ -49,7 +60,7 @@ class _AttendancePageState extends State<AttendancePage> with WidgetsBindingObse
     if (authState is AuthAuthenticated) {
       context.read<AttendanceBloc>().add(
             CheckTodayAttendanceRequested(
-              uid: authState.user.uid,
+              uid: authState.user.uid ,
               employeeId: authState.user.employeeId,
             ),
           );
@@ -67,7 +78,21 @@ class _AttendancePageState extends State<AttendancePage> with WidgetsBindingObse
       );
 
       if (photo != null && mounted) {
-        context.read<AttendanceBloc>().add(SelfieCaptured(photo.path));
+        // Save to persistent application documents directory so local SQLite path is always permanent & valid offline
+        final appDir = await getApplicationDocumentsDirectory();
+        final selfiesDir = Directory(p.join(appDir.path, 'attendance_selfies'));
+        if (!await selfiesDir.exists()) {
+          await selfiesDir.create(recursive: true);
+        }
+        final timestamp = DateTime.now().millisecondsSinceEpoch;
+        final persistentPath = p.join(selfiesDir.path, 'selfie_$timestamp.jpg');
+        await File(photo.path).copy(persistentPath);
+
+        if (mounted) {
+          context.read<AttendanceBloc>().add(
+            SelfieCaptured(persistentPath),
+          );
+        }
       }
     } catch (e) {
       if (mounted) {
@@ -92,20 +117,37 @@ class _AttendancePageState extends State<AttendancePage> with WidgetsBindingObse
 
     final user = authState.user;
     final hasSelfie = state.selfiePath != null && File(state.selfiePath!).existsSync();
+    final hasLocation = state.currentLocation != null;
+
+    // Condition 1: Selfie image is strictly mandatory
+    if (!hasSelfie) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(state.isCheckedIn
+              ? 'Selfie image is mandatory for Check-Out. Please take a photo first.'
+              : 'Selfie image is mandatory for Check-In. Please take a photo first.'),
+          backgroundColor: AppColors.error,
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+      _takeSelfie();
+      return;
+    }
+
+    // Condition 2: GPS Location is strictly mandatory (works offline via device GPS)
+    if (!hasLocation) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('GPS Location is mandatory for attendance. Acquiring location, please wait...'),
+          backgroundColor: Color(0xFFD97706),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+      context.read<AttendanceBloc>().add(const RefreshAttendanceLocationRequested());
+      return;
+    }
 
     if (state.isNotCheckedIn) {
-      if (!hasSelfie) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Selfie image is mandatory for Check-In. Please take a photo first.'),
-            backgroundColor: AppColors.error,
-            behavior: SnackBarBehavior.floating,
-          ),
-        );
-        _takeSelfie();
-        return;
-      }
-
       context.read<AttendanceBloc>().add(
             PerformCheckInRequested(
               uid: user.uid,
@@ -119,18 +161,6 @@ class _AttendancePageState extends State<AttendancePage> with WidgetsBindingObse
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('No active check-in found for today. Please check in first.')),
         );
-        return;
-      }
-
-      if (!hasSelfie) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Selfie image is mandatory for Check-Out. Please take a photo first.'),
-            backgroundColor: AppColors.error,
-            behavior: SnackBarBehavior.floating,
-          ),
-        );
-        _takeSelfie();
         return;
       }
 
@@ -152,7 +182,8 @@ class _AttendancePageState extends State<AttendancePage> with WidgetsBindingObse
       final diff = DateTime.now().difference(checkIn);
       final h = diff.inHours;
       final m = diff.inMinutes % 60;
-      return 'Working hours tracked: ${h}h ${m}m';
+      final s = diff.inSeconds % 60;
+      return 'Working hours tracked: ${h.toString().padLeft(2, '0')}:${m.toString().padLeft(2, '0')}:${s.toString().padLeft(2, '0')} (Live)';
     }
     return 'Shift hours: 09:30 AM - 06:30 PM';
   }
@@ -190,9 +221,15 @@ class _AttendancePageState extends State<AttendancePage> with WidgetsBindingObse
 
         final todayStr = AppDateUtils.formatDisplayDate(DateTime.now());
         final todayAttendance = state.verifiedTodayAttendance;
-        final checkInTimeStr = AppDateUtils.formatDisplayTime(todayAttendance?.checkIn);
-        final checkOutTimeStr = AppDateUtils.formatDisplayTime(todayAttendance?.checkOut);
+        final now = DateTime.now();
 
+        final checkInTimeStr = todayAttendance?.checkIn != null
+            ? AppDateUtils.formatDisplayTime(todayAttendance!.checkIn)
+            : AppDateUtils.formatDisplayTime(now);
+
+        final checkOutTimeStr = todayAttendance?.checkOut != null
+            ? AppDateUtils.formatDisplayTime(todayAttendance!.checkOut)
+            : '--:--';
         return Scaffold(
           backgroundColor: AppColors.background,
           appBar: AppBar(
@@ -233,6 +270,9 @@ class _AttendancePageState extends State<AttendancePage> with WidgetsBindingObse
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
+                    // Connectivity & Sync Status Banner
+                    _buildConnectivityBanner(state),
+
                     // 1. Today's Attendance Card
                     _buildTodayAttendanceCard(
                       dateStr: todayStr,
@@ -421,38 +461,147 @@ class _AttendancePageState extends State<AttendancePage> with WidgetsBindingObse
             ],
           ),
           const SizedBox(height: 12),
-          Align(
-            alignment: Alignment.centerLeft,
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-              decoration: BoxDecoration(
-                color: statusBgColor,
-                borderRadius: BorderRadius.circular(12),
-              ),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Icon(
-                    isCheckedIn || isCheckedOut ? Icons.circle : Icons.cancel_outlined,
-                    size: 8,
-                    color: statusColor,
-                  ),
-                  const SizedBox(width: 6),
-                  Text(
-                    statusText,
-                    style: TextStyle(
-                      fontSize: 12,
-                      fontWeight: FontWeight.w600,
+          Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                decoration: BoxDecoration(
+                  color: statusBgColor,
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(
+                      isCheckedIn || isCheckedOut ? Icons.circle : Icons.cancel_outlined,
+                      size: 8,
                       color: statusColor,
                     ),
-                  ),
-                ],
+                    const SizedBox(width: 6),
+                    Text(
+                      statusText,
+                      style: TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                        color: statusColor,
+                      ),
+                    ),
+                  ],
+                ),
               ),
-            ),
+              if (state.todayAttendance != null) ...[
+                const SizedBox(width: 8),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: state.todayAttendance!.isSynced
+                        ? const Color(0xFFE8F3EE)
+                        : const Color(0xFFFEF3C7),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(
+                        state.todayAttendance!.isSynced ? Icons.cloud_done : Icons.cloud_off,
+                        size: 12,
+                        color: state.todayAttendance!.isSynced
+                            ? AppColors.primary
+                            : const Color(0xFFD97706),
+                      ),
+                      const SizedBox(width: 4),
+                      Text(
+                        state.todayAttendance!.isSynced ? 'Synced' : 'Saved Locally',
+                        style: TextStyle(
+                          fontSize: 11,
+                          fontWeight: FontWeight.w600,
+                          color: state.todayAttendance!.isSynced
+                              ? AppColors.primary
+                              : const Color(0xFFD97706),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ],
           ),
         ],
       ),
     );
+  }
+
+  Widget _buildConnectivityBanner(AttendanceState state) {
+    if (state.isSyncing) {
+      return Container(
+        margin: const EdgeInsets.only(bottom: 16),
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+        decoration: BoxDecoration(
+          color: const Color(0xFFEFF6FF),
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: const Color(0xFF93C5FD)),
+        ),
+        child: const Row(
+          children: [
+            SizedBox(
+              width: 14,
+              height: 14,
+              child: CircularProgressIndicator(strokeWidth: 2, color: Color(0xFF2563EB)),
+            ),
+            SizedBox(width: 10),
+            Expanded(
+              child: Text(
+                'Syncing offline attendance records with server...',
+                style: TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                  color: Color(0xFF1E40AF),
+                ),
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
+    if (state.isOffline) {
+      return Container(
+        margin: const EdgeInsets.only(bottom: 16),
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+        decoration: BoxDecoration(
+          color: const Color(0xFFFFFBEB),
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: const Color(0xFFFDE68A)),
+        ),
+        child: Row(
+          children: [
+            const Icon(Icons.wifi_off_rounded, size: 18, color: Color(0xFFD97706)),
+            const SizedBox(width: 10),
+            const Expanded(
+              child: Text(
+                'Offline Mode: Attendance will save locally and auto-sync once connected.',
+                style: TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w500,
+                  color: Color(0xFF92400E),
+                ),
+              ),
+            ),
+            IconButton(
+              icon: const Icon(Icons.sync_rounded, size: 18, color: Color(0xFFD97706)),
+              tooltip: 'Retry Sync',
+              constraints: const BoxConstraints(),
+              padding: EdgeInsets.zero,
+              onPressed: () {
+                context.read<AttendanceBloc>().add(const SyncUnsyncedAttendanceRequested());
+              },
+            ),
+          ],
+        ),
+      );
+    }
+
+    return const SizedBox.shrink();
   }
 
   Widget _buildIdentityVerificationCard({
@@ -461,9 +610,37 @@ class _AttendancePageState extends State<AttendancePage> with WidgetsBindingObse
     required String? selfiePath,
     required AttendanceState state,
   }) {
-    final hasSelfie = selfiePath != null && File(selfiePath).existsSync();
+    final todayAttendance = state.verifiedTodayAttendance;
     final isCheckedIn = state.isCheckedIn;
     final isCheckedOut = state.isCheckedOut;
+
+    // Resolve which image to display:
+    // 1. Newly captured selfie (for either check-in or check-out)
+    // 2. Or saved check-in / check-out image from local SQLite database
+    String? displayImagePath;
+    String photoStatusLabel = '';
+    bool isNewlyCaptured = false;
+
+    if (selfiePath != null && File(selfiePath).existsSync()) {
+      displayImagePath = selfiePath;
+      photoStatusLabel = isCheckedIn ? 'Ready for Check-Out' : 'Ready for Check-In';
+      isNewlyCaptured = true;
+    } else if (isCheckedOut) {
+      if (todayAttendance?.checkOutSelfie != null && File(todayAttendance!.checkOutSelfie!).existsSync()) {
+        displayImagePath = todayAttendance.checkOutSelfie;
+        photoStatusLabel = 'Check-Out Photo (Saved Locally)';
+      } else if (todayAttendance?.checkInSelfie != null && File(todayAttendance!.checkInSelfie!).existsSync()) {
+        displayImagePath = todayAttendance.checkInSelfie;
+        photoStatusLabel = 'Check-In Photo (Saved Locally)';
+      }
+    } else if (isCheckedIn) {
+      if (todayAttendance?.checkInSelfie != null && File(todayAttendance!.checkInSelfie!).existsSync()) {
+        displayImagePath = todayAttendance.checkInSelfie;
+        photoStatusLabel = 'Check-In Photo (Saved in DB)';
+      }
+    }
+
+    final hasDisplayImage = displayImagePath != null && File(displayImagePath).existsSync();
 
     String cardTitle;
     String badgeTitle;
@@ -477,14 +654,14 @@ class _AttendancePageState extends State<AttendancePage> with WidgetsBindingObse
       buttonText = 'Retake Photo';
     } else if (isCheckedIn) {
       cardTitle = 'Identity Verification (Check-Out)';
-      badgeTitle = 'Mandatory for Punch Out';
+      badgeTitle = isNewlyCaptured ? 'Ready for Punch-Out' : 'Check-Out Photo Required';
       promptText = 'Capture selfie with camera to Punch Out';
-      buttonText = 'Take Selfie for Check-Out';
+      buttonText = isNewlyCaptured ? 'Retake Photo' : 'Take Selfie for Check-Out';
     } else {
       cardTitle = 'Identity Verification (Check-In)';
-      badgeTitle = 'Mandatory for Punch In';
+      badgeTitle = hasDisplayImage ? 'Ready for Punch-In' : '*';
       promptText = 'Capture selfie with camera to Punch In';
-      buttonText = 'Take Selfie for Check-In';
+      buttonText = hasDisplayImage ? 'Retake Photo' : 'Take Selfie for Check-In';
     }
 
     return Container(
@@ -518,28 +695,30 @@ class _AttendancePageState extends State<AttendancePage> with WidgetsBindingObse
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                 decoration: BoxDecoration(
-                  color: isCheckedOut
-                      ? const Color(0xFF10B981).withAlpha(30)
-                      : (hasSelfie
-                          ? const Color(0xFF10B981).withAlpha(30)
-                          : const Color(0xFFEF4444).withAlpha(25)),
-                  borderRadius: BorderRadius.circular(8),
+                  color: isCheckedOut || (hasDisplayImage && (!isCheckedIn || isNewlyCaptured))
+                      ? const Color(0xFFE8F3EE)
+                      : const Color(0xFFFEF3C7),
+                  borderRadius: BorderRadius.circular(12),
                 ),
                 child: Text(
-                  hasSelfie ? 'Verified' : badgeTitle,
+                  isCheckedOut
+                      ? 'Verified'
+                      : (hasDisplayImage && (!isCheckedIn || isNewlyCaptured)
+                          ? 'Verified'
+                          : badgeTitle),
                   style: TextStyle(
                     fontSize: 11,
                     fontWeight: FontWeight.w600,
-                    color: isCheckedOut
+                    color: isCheckedOut || (hasDisplayImage && (!isCheckedIn || isNewlyCaptured))
                         ? const Color(0xFF059669)
-                        : (hasSelfie ? const Color(0xFF059669) : const Color(0xFFDC2626)),
+                        : const Color(0xFFD97706),
                   ),
                 ),
               ),
             ],
           ),
           const SizedBox(height: 14),
-          if (hasSelfie) ...[
+          if (hasDisplayImage) ...[
             ClipRRect(
               borderRadius: BorderRadius.circular(14),
               child: Stack(
@@ -550,7 +729,7 @@ class _AttendancePageState extends State<AttendancePage> with WidgetsBindingObse
                     width: double.infinity,
                     color: Colors.black12,
                     child: Image.file(
-                      File(selfiePath),
+                      File(displayImagePath),
                       fit: BoxFit.cover,
                     ),
                   ),
@@ -582,9 +761,9 @@ class _AttendancePageState extends State<AttendancePage> with WidgetsBindingObse
                                 fontWeight: FontWeight.w600,
                               ),
                             ),
-                            const Text(
-                              'Face Captured & Ready',
-                              style: TextStyle(
+                            Text(
+                              photoStatusLabel,
+                              style: const TextStyle(
                                 color: Color(0xFF34D399),
                                 fontSize: 11,
                                 fontWeight: FontWeight.w500,
@@ -592,27 +771,51 @@ class _AttendancePageState extends State<AttendancePage> with WidgetsBindingObse
                             ),
                           ],
                         ),
-                        ElevatedButton.icon(
-                          onPressed: _takeSelfie,
-                          icon: const Icon(Icons.refresh_rounded, size: 16),
-                          label: const Text('Retake'),
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: Colors.white,
-                            foregroundColor: AppColors.textPrimary,
-                            elevation: 2,
-                            minimumSize: const Size(80, 32),
-                            padding: const EdgeInsets.symmetric(horizontal: 10),
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(16),
+                        if (!isCheckedOut)
+                          ElevatedButton.icon(
+                            onPressed: _takeSelfie,
+                            icon: const Icon(Icons.camera_alt_outlined, size: 15),
+                            label: Text(
+                              isCheckedIn && !isNewlyCaptured ? 'Take Check-Out Photo' : 'Retake',
+                              style: const TextStyle(fontSize: 12),
+                            ),
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: isCheckedIn && !isNewlyCaptured
+                                  ? AppColors.primary
+                                  : Colors.white,
+                              foregroundColor: isCheckedIn && !isNewlyCaptured
+                                  ? Colors.white
+                                  : AppColors.textPrimary,
+                              elevation: 2,
+                              minimumSize: const Size(80, 32),
+                              padding: const EdgeInsets.symmetric(horizontal: 10),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(16),
+                              ),
                             ),
                           ),
-                        ),
                       ],
                     ),
                   ),
                 ],
               ),
             ),
+            if (isCheckedIn && !isNewlyCaptured) ...[
+              const SizedBox(height: 12),
+              OutlinedButton.icon(
+                onPressed: _takeSelfie,
+                icon: const Icon(Icons.camera_alt_outlined, size: 18),
+                label: const Text('Capture Selfie for Check-Out'),
+                style: OutlinedButton.styleFrom(
+                  minimumSize: const Size(double.infinity, 44),
+                  foregroundColor: AppColors.primary,
+                  side: const BorderSide(color: AppColors.primary),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                ),
+              ),
+            ],
           ] else if (isCheckedOut) ...[
             Container(
               padding: const EdgeInsets.all(16),
@@ -621,13 +824,13 @@ class _AttendancePageState extends State<AttendancePage> with WidgetsBindingObse
                 borderRadius: BorderRadius.circular(14),
                 border: Border.all(color: AppColors.border),
               ),
-              child: Row(
-                children: const [
+              child: const Row(
+                children: [
                   Icon(Icons.check_circle_rounded, color: Color(0xFF10B981), size: 28),
                   SizedBox(width: 12),
                   Expanded(
                     child: Text(
-                      'Shift completed! Both check-in and check-out photos were captured and recorded.',
+                      'Shift completed! Both check-in and check-out photos were captured and recorded in local database.',
                       style: TextStyle(fontSize: 13, color: AppColors.textSecondary),
                     ),
                   ),
