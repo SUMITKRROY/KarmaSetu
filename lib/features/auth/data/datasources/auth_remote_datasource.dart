@@ -160,14 +160,14 @@ class AuthRemoteDataSourceImpl implements AuthRemoteDataSource {
   Future<UserModel> _getUserOrProvision(fb.User fbUser) async {
     try {
       final docRef = _firestore.collection(_usersCollection).doc(fbUser.uid);
-      final snapshot = await docRef.get();
+      final snapshot = await docRef.get().timeout(const Duration(milliseconds: 1500));
 
       if (snapshot.exists && snapshot.data() != null) {
         return UserModel.fromFirestore(snapshot.data()!, fbUser.uid);
       }
     } catch (_) {}
 
-    // Build initial profile if Firestore doc doesn't exist yet
+    // Build initial profile if Firestore doc doesn't exist yet or if offline
     final email = fbUser.email?.toLowerCase() ?? '';
     final isApprover = email.contains('approver');
 
@@ -185,7 +185,8 @@ class AuthRemoteDataSourceImpl implements AuthRemoteDataSource {
       await _firestore
           .collection(_usersCollection)
           .doc(fbUser.uid)
-          .set(userModel.toFirestore(), SetOptions(merge: true));
+          .set(userModel.toFirestore(), SetOptions(merge: true))
+          .timeout(const Duration(milliseconds: 1000));
     } catch (_) {}
 
     return userModel;

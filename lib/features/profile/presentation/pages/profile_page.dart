@@ -209,30 +209,7 @@ class _ProfilePageState extends State<ProfilePage> {
                             ],
                           ),
                         ),
-                        const SizedBox(width: 8),
-                        Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                          decoration: BoxDecoration(
-                            color: const Color(0xFFEFF6FF),
-                            borderRadius: BorderRadius.circular(20),
-                            border: Border.all(color: const Color(0xFFBFDBFE)),
-                          ),
-                          child: const Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Icon(Icons.storage_rounded, size: 12, color: Color(0xFF2563EB)),
-                              SizedBox(width: 4),
-                              Text(
-                                'Local DB Synced',
-                                style: TextStyle(
-                                  fontSize: 11,
-                                  fontWeight: FontWeight.w600,
-                                  color: Color(0xFF1D4ED8),
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
+                        
                       ],
                     ),
                     const SizedBox(height: 24),
@@ -264,24 +241,7 @@ class _ProfilePageState extends State<ProfilePage> {
                         ),
                       ],
                     ),
-                    const SizedBox(height: 16),
 
-                    // 4. Local Storage SQLite Details
-                    _buildSectionCard(
-                      title: 'Local Storage Details (DatabaseHelper)',
-                      icon: Icons.data_object_outlined,
-                      children: [
-                        _buildInfoRow('TABLE', ProfileTable.tableName),
-                        if (uid.isNotEmpty) _buildInfoRow('LOCAL UID', uid),
-                        _buildInfoRow(
-                          'STATUS',
-                          _isLoadingLocal
-                              ? 'Loading local DB...'
-                              : (_localProfile != null ? 'Synced from SQLite' : 'Default / In-Memory'),
-                          isLast: true,
-                        ),
-                      ],
-                    ),
                     const SizedBox(height: 24),
 
                     // Logout Button

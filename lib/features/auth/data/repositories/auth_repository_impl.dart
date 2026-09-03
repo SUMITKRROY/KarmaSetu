@@ -50,14 +50,34 @@ class AuthRepositoryImpl implements AuthRepository {
     // 1. Check local SQLite storage first
     final localUser = await localDataSource.getUser();
 
-    // 2. Query Firebase to sync any updates
-    final remoteUser = await remoteDataSource.getCurrentUser();
-    if (remoteUser != null) {
-      await localDataSource.saveUser(UserModel.fromUser(remoteUser));
-      return remoteUser;
+    if (localUser != null) {
+      // User is authenticated locally. Attempt a quick remote sync without blocking offline startup.
+      try {
+        final remoteUser = await remoteDataSource.getCurrentUser().timeout(
+          const Duration(milliseconds: 1000),
+        );
+        if (remoteUser != null) {
+          await localDataSource.saveUser(UserModel.fromUser(remoteUser));
+          return remoteUser;
+        }
+      } catch (_) {
+        // Offline or remote timeout: seamlessly return the cached local user
+      }
+      return localUser;
     }
 
-    return localUser;
+    // 2. If no local user exists, query Firebase with a timeout
+    try {
+      final remoteUser = await remoteDataSource.getCurrentUser().timeout(
+        const Duration(milliseconds: 2000),
+      );
+      if (remoteUser != null) {
+        await localDataSource.saveUser(UserModel.fromUser(remoteUser));
+        return remoteUser;
+      }
+    } catch (_) {}
+
+    return null;
   }
 
   @override
@@ -76,9 +96,9 @@ class AuthRepositoryImpl implements AuthRepository {
     return remoteDataSource.authStateChanges.asyncMap((user) async {
       if (user != null) {
         await localDataSource.saveUser(UserModel.fromUser(user));
-      } else {
-        await localDataSource.clearUser();
       }
+      // Never delete local credentials on stream null events (which happen when offline).
+      // Only explicit logout() clears the local user.
       return user;
     });
   }

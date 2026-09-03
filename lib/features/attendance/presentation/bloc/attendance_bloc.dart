@@ -5,10 +5,15 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 import '../../../../core/services/connectivity_service.dart';
 import '../../../../core/services/location_service.dart';
 import '../../../../core/utils/date_utils.dart';
+import 'package:geolocator/geolocator.dart';
 import '../../data/models/attendance_model.dart';
 import '../../domain/repositories/attendance_repository.dart';
 import 'attendance_event.dart';
 import 'attendance_state.dart';
+
+const double _assignedLat = 12.9031027;
+const double _assignedLng = 77.6325216;
+const double _maxRadiusMeters = 500.0;
 
 class AttendanceBloc extends Bloc<AttendanceEvent, AttendanceState> {
   final AttendanceRepository _attendanceRepository;
@@ -320,6 +325,21 @@ class AttendanceBloc extends Bloc<AttendanceEvent, AttendanceState> {
         return;
       }
 
+      // Mandatory condition 3: Geofencing constraint
+      final distance = Geolocator.distanceBetween(
+        location.latitude,
+        location.longitude,
+        _assignedLat,
+        _assignedLng,
+      );
+      if (distance > _maxRadiusMeters) {
+        emit(state.copyWith(
+          submissionStatus: AttendanceSubmissionStatus.failure,
+          errorMessage: 'Location blocked: You are outside the assigned site radius (${distance.toStringAsFixed(0)}m > ${_maxRadiusMeters.toStringAsFixed(0)}m).',
+        ));
+        return;
+      }
+
       final docId = '${event.uid}_$todayDate';
 
       final model = AttendanceModel(
@@ -402,6 +422,21 @@ class AttendanceBloc extends Bloc<AttendanceEvent, AttendanceState> {
         emit(state.copyWith(
           submissionStatus: AttendanceSubmissionStatus.failure,
           errorMessage: 'GPS Location is mandatory for Check-Out. Please turn on GPS and grant location permission.',
+        ));
+        return;
+      }
+
+      // Mandatory condition 3: Geofencing constraint
+      final distance = Geolocator.distanceBetween(
+        location.latitude,
+        location.longitude,
+        _assignedLat,
+        _assignedLng,
+      );
+      if (distance > _maxRadiusMeters) {
+        emit(state.copyWith(
+          submissionStatus: AttendanceSubmissionStatus.failure,
+          errorMessage: 'Location blocked: You are outside the assigned site radius (${distance.toStringAsFixed(0)}m > ${_maxRadiusMeters.toStringAsFixed(0)}m).',
         ));
         return;
       }

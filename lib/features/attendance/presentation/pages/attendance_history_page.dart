@@ -103,8 +103,9 @@ class _AttendanceHistoryPageState extends State<AttendanceHistoryPage> {
         // Filter records strictly matching the selected month and year, sorted date descending
         final history = state.history;
         final filteredHistory = history.where((item) {
-          return item.checkIn.year == _selectedDate.year &&
-              item.checkIn.month == _selectedDate.month;
+          final localCheckIn = item.checkIn.toLocal();
+          return localCheckIn.year == _selectedDate.year &&
+                 localCheckIn.month == _selectedDate.month;
         }).toList()
           ..sort((a, b) => b.checkIn.compareTo(a.checkIn));
 

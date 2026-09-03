@@ -40,18 +40,6 @@ class _LoginPageState extends State<LoginPage> {
     }
   }
 
-  void _quickFill(String email, String password) {
-    setState(() {
-      _emailController.text = email;
-      _passwordController.text = password;
-    });
-    context.read<AuthBloc>().add(
-          AuthLoginRequested(
-            email: email,
-            password: password,
-          ),
-        );
-  }
 
   @override
   Widget build(BuildContext context) {
@@ -167,65 +155,8 @@ class _LoginPageState extends State<LoginPage> {
                               ),
                               const SizedBox(height: 20),
 
-                              // Quick Login Test Credentials Chips
-                              Container(
-                                padding: const EdgeInsets.all(12),
-                                decoration: BoxDecoration(
-                                  color: const Color(0xFFF1F5F9),
-                                  borderRadius: BorderRadius.circular(12),
-                                  border: Border.all(color: AppColors.border),
-                                ),
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    const Row(
-                                      children: [
-                                        Icon(Icons.touch_app_outlined, size: 16, color: AppColors.textSecondary),
-                                        SizedBox(width: 6),
-                                        Text(
-                                          'Quick Test Sign-in',
-                                          style: TextStyle(
-                                            fontSize: 12,
-                                            fontWeight: FontWeight.w700,
-                                            color: AppColors.textPrimary,
-                                          ),
-                                        ),
-                                      ],
-                                    ),
-                                    const SizedBox(height: 8),
-                                    Row(
-                                      children: [
-                                        Expanded(
-                                          child: _buildQuickChip(
-                                            label: 'Employee',
-                                            subtitle: 'EMP001',
-                                            icon: Icons.person_outline,
-                                            color: const Color(0xFF0F766E),
-                                            bgColor: const Color(0xFFCCFBF1),
-                                            onTap: isLoading
-                                                ? null
-                                                : () => _quickFill('employee@test.com', 'Employee@123'),
-                                          ),
-                                        ),
-                                        const SizedBox(width: 8),
-                                        Expanded(
-                                          child: _buildQuickChip(
-                                            label: 'Approver',
-                                            subtitle: 'APP001',
-                                            icon: Icons.verified_user_outlined,
-                                            color: const Color(0xFF1D4ED8),
-                                            bgColor: const Color(0xFFDBEAFE),
-                                            onTap: isLoading
-                                                ? null
-                                                : () => _quickFill('approver@test.com', 'Approver@123'),
-                                          ),
-                                        ),
-                                      ],
-                                    ),
-                                  ],
-                                ),
-                              ),
-                              const SizedBox(height: 20),
+
+
 
                               // Email Field
                               AppTextField(
@@ -400,35 +331,7 @@ class _LoginPageState extends State<LoginPage> {
                                 isLoading: isLoading,
                                 onPressed: _handleLogin,
                               ),
-                              const SizedBox(height: 16),
 
-                              // Register Link
-                              Wrap(
-                                alignment: WrapAlignment.center,
-                                crossAxisAlignment: WrapCrossAlignment.center,
-                                children: [
-                                  const Text(
-                                    "Don't have an account? ",
-                                    style: TextStyle(
-                                      fontSize: 13,
-                                      color: AppColors.textSecondary,
-                                    ),
-                                  ),
-                                  GestureDetector(
-                                    onTap: () {
-                                      Navigator.of(context).pushReplacementNamed(RouteNames.register);
-                                    },
-                                    child: const Text(
-                                      'Create Account',
-                                      style: TextStyle(
-                                        fontSize: 13,
-                                        fontWeight: FontWeight.w700,
-                                        color: AppColors.primary,
-                                      ),
-                                    ),
-                                  ),
-                                ],
-                              ),
                             ],
                           ),
                         ),
@@ -449,7 +352,7 @@ class _LoginPageState extends State<LoginPage> {
                       ),
                       const SizedBox(height: 8),
                       Text(
-                        '© 2024 KarmaSetu HRMS',
+                        '© 2026 KarmaSetu HRMS',
                         style: AppTextStyles.caption.copyWith(
                           color: AppColors.textSecondary.withAlpha(180),
                         ),

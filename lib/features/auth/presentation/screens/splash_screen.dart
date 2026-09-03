@@ -15,6 +15,8 @@ class SplashScreen extends StatefulWidget {
 class _SplashScreenState extends State<SplashScreen> with SingleTickerProviderStateMixin {
   late AnimationController _animationController;
   late Animation<double> _fadeAnimation;
+  bool _minAnimationCompleted = false;
+  bool _hasNavigated = false;
 
   @override
   void initState() {
@@ -36,16 +38,38 @@ class _SplashScreenState extends State<SplashScreen> with SingleTickerProviderSt
     // Check auth status
     context.read<AuthBloc>().add(const AuthCheckRequested());
 
-    // Navigate after animation
-    Future.delayed(const Duration(milliseconds: 2200), () {
+    // Minimum display duration for splash animation (1800ms)
+    Future.delayed(const Duration(milliseconds: 1800), () {
       if (!mounted) return;
-      final authState = context.read<AuthBloc>().state;
-      if (authState is AuthAuthenticated) {
-        Navigator.of(context).pushReplacementNamed(RouteNames.dashboard);
-      } else {
-        Navigator.of(context).pushReplacementNamed(RouteNames.login);
-      }
+      _minAnimationCompleted = true;
+      _evaluateAndNavigate();
     });
+
+    // Safety fallback timeout in case auth check takes unusually long
+    Future.delayed(const Duration(milliseconds: 3500), () {
+      if (!mounted || _hasNavigated) return;
+      _minAnimationCompleted = true;
+      _evaluateAndNavigate(force: true);
+    });
+  }
+
+  void _evaluateAndNavigate({AuthState? state, bool force = false}) {
+    if (!mounted || _hasNavigated) return;
+    if (!_minAnimationCompleted && !force) return;
+
+    final currentAuthState = state ?? context.read<AuthBloc>().state;
+
+    // If still resolving auth and not forcing, wait for BlocListener
+    if ((currentAuthState is AuthLoading || currentAuthState is AuthInitial) && !force) {
+      return;
+    }
+
+    _hasNavigated = true;
+    if (currentAuthState is AuthAuthenticated) {
+      Navigator.of(context).pushReplacementNamed(RouteNames.dashboard);
+    } else {
+      Navigator.of(context).pushReplacementNamed(RouteNames.login);
+    }
   }
 
   @override
@@ -56,7 +80,13 @@ class _SplashScreenState extends State<SplashScreen> with SingleTickerProviderSt
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
+    return BlocListener<AuthBloc, AuthState>(
+      listener: (context, state) {
+        if (state is AuthAuthenticated || state is AuthUnauthenticated || state is AuthError) {
+          _evaluateAndNavigate(state: state);
+        }
+      },
+      child: Scaffold(
       backgroundColor: AppColors.background,
       body: FadeTransition(
         opacity: _fadeAnimation,
@@ -158,6 +188,7 @@ class _SplashScreenState extends State<SplashScreen> with SingleTickerProviderSt
           ],
         ),
       ),
+    ),
     );
   }
 }

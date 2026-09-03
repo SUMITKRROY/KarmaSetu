@@ -37,12 +37,20 @@ class AuthBloc extends Bloc<AuthEvent, AuthState> {
       final user = await _authRepository.getCurrentUser();
       if (user != null) {
         emit(AuthAuthenticated(user));
-      } else {
-        emit(const AuthUnauthenticated());
+        return;
       }
-    } catch (_) {
-      emit(const AuthUnauthenticated());
-    }
+    } catch (_) {}
+
+    // Fallback: Check local SQLite database directly
+    try {
+      final localUser = await _authRepository.getLocalUser();
+      if (localUser != null) {
+        emit(AuthAuthenticated(localUser));
+        return;
+      }
+    } catch (_) {}
+
+    emit(const AuthUnauthenticated());
   }
 
   Future<void> _onAuthLoginRequested(
@@ -123,13 +131,23 @@ class AuthBloc extends Bloc<AuthEvent, AuthState> {
     }
   }
 
-  void _onAuthUserChanged(
+  Future<void> _onAuthUserChanged(
     AuthUserChanged event,
     Emitter<AuthState> emit,
-  ) {
+  ) async {
     if (event.user != null) {
       emit(AuthAuthenticated(event.user!));
     } else {
+      // If Firebase auth emits null (e.g. offline start or network hiccup),
+      // verify whether a user is authenticated in the local database before declaring unauthenticated.
+      try {
+        final localUser = await _authRepository.getLocalUser();
+        if (localUser != null) {
+          emit(AuthAuthenticated(localUser));
+          return;
+        }
+      } catch (_) {}
+
       emit(const AuthUnauthenticated());
     }
   }

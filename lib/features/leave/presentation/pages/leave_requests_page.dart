@@ -634,7 +634,7 @@ class _LeaveRequestsPageState extends State<LeaveRequestsPage> {
       return Container(
         padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
         decoration: BoxDecoration(
-          color: const Color(0xFFE8F5E9),
+          color: const Color(0xFFFFF3E0),
           borderRadius: BorderRadius.circular(12),
         ),
         child: const Text(
@@ -642,7 +642,7 @@ class _LeaveRequestsPageState extends State<LeaveRequestsPage> {
           style: TextStyle(
             fontSize: 11,
             fontWeight: FontWeight.w800,
-            color: Color(0xFF2E7D32),
+            color: Color(0xFFE65100),
             letterSpacing: 0.5,
           ),
         ),

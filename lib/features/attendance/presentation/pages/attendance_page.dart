@@ -5,6 +5,7 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
+import 'package:google_mlkit_face_detection/google_mlkit_face_detection.dart';
 import '../../../../app/theme/app_colors.dart';
 import '../../../../app/theme/app_text_styles.dart';
 import '../../../../core/services/location_service.dart';
@@ -78,6 +79,28 @@ class _AttendancePageState extends State<AttendancePage> with WidgetsBindingObse
       );
 
       if (photo != null && mounted) {
+        // Face Detection Validation
+        final inputImage = InputImage.fromFilePath(photo.path);
+        final faceDetector = FaceDetector(options: FaceDetectorOptions());
+        final List<Face> faces = await faceDetector.processImage(inputImage);
+        await faceDetector.close();
+
+        if (faces.length != 1) {
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text(
+                  faces.isEmpty
+                      ? 'Photo rejected: No face detected. Please try again.'
+                      : 'Photo rejected: Multiple faces detected. Only one face allowed.',
+                ),
+                backgroundColor: AppColors.error,
+              ),
+            );
+          }
+          return;
+        }
+
         // Save to persistent application documents directory so local SQLite path is always permanent & valid offline
         final appDir = await getApplicationDocumentsDirectory();
         final selfiesDir = Directory(p.join(appDir.path, 'attendance_selfies'));
@@ -643,23 +666,19 @@ class _AttendancePageState extends State<AttendancePage> with WidgetsBindingObse
     final hasDisplayImage = displayImagePath != null && File(displayImagePath).existsSync();
 
     String cardTitle;
-    String badgeTitle;
     String promptText;
     String buttonText;
 
     if (isCheckedOut) {
       cardTitle = 'Identity Verification';
-      badgeTitle = 'Shift Completed';
       promptText = 'Attendance verified for Check-In and Check-Out';
       buttonText = 'Retake Photo';
     } else if (isCheckedIn) {
       cardTitle = 'Identity Verification (Check-Out)';
-      badgeTitle = isNewlyCaptured ? 'Ready for Punch-Out' : '*';
       promptText = 'Capture selfie with camera to Punch Out';
       buttonText = isNewlyCaptured ? 'Retake Photo' : 'Take Selfie for Check-Out';
     } else {
       cardTitle = 'Identity Verification (Check-In)';
-      badgeTitle = hasDisplayImage ? 'Ready for Punch-In' : '*';
       promptText = 'Capture selfie with camera to Punch In';
       buttonText = hasDisplayImage ? 'Retake Photo' : 'Take Selfie for Check-In';
     }
